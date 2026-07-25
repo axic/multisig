@@ -59,8 +59,18 @@ const eip712DomainType = [
 const domain = {
   name: 'PreimageDemo',
   version: '1',
-  chainId: 31337,
+  chainId: 100, // Gnosis Chain
   verifyingContract: VERIFYING_CONTRACT,
+}
+
+// Gnosis Chain network params, used to nudge the wallet onto chainId 100 so the
+// connected network matches the domain. Best-effort: signing works regardless.
+const GNOSIS = {
+  chainId: '0x64',
+  chainName: 'Gnosis',
+  nativeCurrency: { name: 'xDAI', symbol: 'XDAI', decimals: 18 },
+  rpcUrls: ['https://rpc.gnosischain.com'],
+  blockExplorerUrls: ['https://gnosisscan.io'],
 }
 const message = { target: MOCK_TOKEN, payloadHash, nonce: '0' }
 
@@ -201,12 +211,24 @@ function errString(err: unknown): string {
   try { return JSON.stringify(err) } catch { return String(err) }
 }
 
+async function ensureGnosis(p: Eip1193) {
+  try {
+    await p.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: GNOSIS.chainId }] })
+  } catch (err) {
+    if ((err as { code?: number })?.code === 4902) {
+      try { await p.request({ method: 'wallet_addEthereumChain', params: [GNOSIS] }); return } catch { /* fall through */ }
+    }
+    log(`(couldn't switch to Gnosis: ${errString(err)} — signing anyway; domain chainId is 100 regardless)`)
+  }
+}
+
 async function signVariant(name: string, v: Variant) {
   if (!selected) { log('⚠ pick a wallet first'); return }
   log(`\n=== ${name} ===`)
   log(`request: eth_signTypedData_v4\n${JSON.stringify(v, null, 2)}`)
   try {
     const [address] = (await selected.provider.request({ method: 'eth_requestAccounts' })) as Hex[]
+    await ensureGnosis(selected.provider)
     const signature = (await selected.provider.request({
       method: 'eth_signTypedData_v4',
       params: [address, JSON.stringify(v)],

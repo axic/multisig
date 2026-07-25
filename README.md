@@ -24,8 +24,11 @@ npm install
 npm run dev        # → http://localhost:5173
 ```
 
-No Anvil, no RPC keys needed — `chainId: 31337` is just data inside the domain,
-and `eth_signTypedData_v4` doesn't require a matching connected chain.
+Targets **Gnosis Chain** (`chainId: 100`). No RPC keys needed — signing typed
+data is offline. On buttons 1–4 the page best-effort switches the wallet to
+Gnosis (`wallet_switchEthereumChain`, adding it if missing) so the connected
+network matches the domain; if a wallet doesn't support Gnosis (e.g. Phantom's
+EVM), it logs that and signs anyway — the domain `chainId` is `100` regardless.
 
 ## What the buttons do
 
