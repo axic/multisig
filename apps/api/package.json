@@ -1,0 +1,24 @@
+{
+  "name": "@multisig/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo \"(lint: TODO)\""
+  },
+  "dependencies": {
+    "@multisig/core": "workspace:*",
+    "@multisig/db": "workspace:*",
+    "hono": "^4.6.14",
+    "viem": "^2.21.45",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2"
+  }
+}

@@ -1,0 +1,23 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+build/
+.vercel/
+.turbo/
+*.tsbuildinfo
+
+# prisma generated client
+apps/db/generated/
+apps/db/node_modules/.prisma/
+
+# env
+.env
+.env.local
+.env.*.local
+
+# editor / os
+.DS_Store
+*.log

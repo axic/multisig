@@ -1,0 +1,140 @@
+// Prisma schema for the multisig app.
+//
+// Contract reference: axic/solcore @ multisig-ethglobal-rebase
+//   test/examples/dispatch/multisig.solc
+//
+// Unlike Safe, this contract stores queued operations, votes, and status
+// ON-CHAIN. So most of this schema is an INDEX/CACHE that is rebuildable from
+// chain events — the UI reads it for speed and history, but the chain is the
+// source of truth. Two tables hold data that genuinely lives only off-chain:
+//
+//   * UnstoredCallPreimage — the preimage of an `UnstoredCall(bytes32)` op.
+//     The chain stores only the hash; the preimage MUST be supplied at
+//     execute() time. Lose it and the op can never be executed.
+//   * RelaySignature — off-chain signatures collected for the *WithSignature
+//     relay entrypoints, before anyone submits them on-chain.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// A deployed multisig instance. `chainId` is first-class for multi-chain.
+model Wallet {
+  id             String   @id @default(cuid())
+  chainId        Int
+  address        String // checksummed contract address
+  deployTxHash   String?
+  label          String?
+  createdAt      DateTime @default(now())
+
+  // cached on-chain config (reconciled by the indexer)
+  signersCount    Int @default(0)
+  signersRequired Int @default(0)
+  nonce           Int @default(0) // next executable operation index
+
+  signers    Signer[]
+  operations Operation[]
+  preimages  UnstoredCallPreimage[]
+  signatures RelaySignature[]
+
+  @@unique([chainId, address])
+}
+
+// Cache of the on-chain signer set for a wallet.
+model Signer {
+  id       String @id @default(cuid())
+  walletId String
+  address  String
+  index    Int // slot in the on-chain `signers` mapping
+  wallet   Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@unique([walletId, address])
+  @@index([walletId])
+}
+
+// Index of an on-chain queued operation. `index` is its position in the
+// contract's strict execution sequence (the value passed to approve/reject/
+// execute). Voting and status are cached from chain.
+model Operation {
+  id       String @id @default(cuid())
+  walletId String
+  index    Int // on-chain operation id / nonce slot
+
+  kind    String // OperationTag: AddSigner | ... | UnstoredCall | ...
+  decoded Json // decoded fields for display (target, value, amount, hash, ...)
+
+  status      String @default("Approvals") // Approvals | Rejected | Executed
+  approvals   Int    @default(0)
+  proposer    String? // signer that queued it (if known)
+
+  createdTxHash  String?
+  executedTxHash String?
+  createdAt      DateTime @default(now())
+  executedAt     DateTime?
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  votes  Vote[]
+
+  @@unique([walletId, index])
+  @@index([walletId, status])
+}
+
+// Cache of a single signer's on-chain vote on an operation.
+model Vote {
+  id          String @id @default(cuid())
+  operationId String
+  signer      String
+  vote        String // None | Approved | Rejected
+  operation   Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+
+  @@unique([operationId, signer])
+}
+
+// THE preimage store. Keyed by the hash the contract holds on-chain for an
+// UnstoredCall. The preimage is `[address target][uint256 value][bytes payload]`
+// and is what must be handed to execute(nonce, payload).
+model UnstoredCallPreimage {
+  id        String @id @default(cuid())
+  walletId  String
+  hash      String // keccak256(preimage) — matches the on-chain UnstoredCall hash
+
+  target    String
+  value     String // wei, decimal string
+  payload   String // 0x… inner calldata
+
+  createdBy String?
+  createdAt DateTime @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@unique([walletId, hash])
+}
+
+// Off-chain signature collected for a relay entrypoint (queue/approve/reject
+// WithSignature), before submission. `operationPayload` carries the not-yet-
+// on-chain operation for a relayed Queue.
+model RelaySignature {
+  id       String @id @default(cuid())
+  walletId String
+
+  opKind         String // OperationKind: Queue | Approve | Reject
+  operationIndex Int? // for Approve/Reject of an existing op
+  operationPayload Json? // for Queue (op not yet on-chain)
+
+  sigType   String // ECDSA | Contract | EIP1271
+  signer    String
+  signature String // encoded Signature bytes (r/s, contract addr, or 1271 blob)
+  hash      String // the signing hash this authorises (once the scheme is real)
+
+  createdAt DateTime @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  @@index([walletId, opKind])
+}
