@@ -45,9 +45,9 @@ contract Wallet {
     // Execute an arbitrary call from the wallet. Only the owner may call it;
     // `value` (if any) is forwarded from the wallet's own balance. Reverts and
     // bubbles nothing structured if the inner call fails.
-    public payable function execute(to : address, value : uint256, data : memory(bytes)) -> memory(bytes) {
+    public payable function execute(to : address, value : uint256, payload : memory(bytes)) -> memory(bytes) {
         require(caller() == owner, Error(0x82b42900));             // Unauthorized()
-        match raw_call(to, value, data) {
+        match raw_call(to, value, payload) {
         | (ok, ret) =>
             require(ok, Error(0x3204506f));                        // CallFailed()
             return ret;
