@@ -14,7 +14,32 @@ import { z } from "zod";
  */
 export const app = new Hono();
 
-app.use("*", cors());
+// CORS allowlist. The production frontend + local dev are allowed by default;
+// add more origins via CORS_ORIGINS (comma-separated). Set
+// CORS_ALLOW_VERCEL_PREVIEWS=true to also allow this project's rotating Vercel
+// preview URLs (https://multisig-<hash>.vercel.app).
+const DEFAULT_ORIGINS = ["https://multisig-gold.vercel.app", "http://localhost:5173"];
+const ALLOWED_ORIGINS = new Set([
+  ...DEFAULT_ORIGINS,
+  ...(process.env.CORS_ORIGINS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+]);
+const ALLOW_VERCEL_PREVIEWS = process.env.CORS_ALLOW_VERCEL_PREVIEWS === "true";
+const VERCEL_PREVIEW_RE = /^https:\/\/multisig-[a-z0-9-]+\.vercel\.app$/;
+
+app.use(
+  "*",
+  cors({
+    origin: (origin) => {
+      if (!origin) return "*"; // non-browser / same-origin requests
+      if (ALLOWED_ORIGINS.has(origin)) return origin;
+      if (ALLOW_VERCEL_PREVIEWS && VERCEL_PREVIEW_RE.test(origin)) return origin;
+      return null; // not allowed -> no Access-Control-Allow-Origin header
+    },
+  }),
+);
 
 app.get("/health", (c) => c.json({ ok: true }));
 
