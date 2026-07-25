@@ -17,6 +17,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@hono/node-server':
+        specifier: ^1.19.15
+        version: 1.19.15(hono@4.12.32)
       '@multisig/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -33,9 +36,6 @@ importers:
         specifier: ^3.24.1
         version: 3.25.76
     devDependencies:
-      '@hono/node-server':
-        specifier: ^1.13.7
-        version: 1.19.15(hono@4.12.32)
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
