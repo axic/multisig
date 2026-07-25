@@ -35,11 +35,13 @@ export function resolveChains(env: EnvBag): ChainConfig[] {
     .filter((n) => Number.isInteger(n) && n > 0);
 
   return ids.map((chainId) => {
-    const rpcUrl = readEnv(`RPC_URL_${chainId}`, env);
+    const known = KNOWN_CHAINS[chainId as keyof typeof KNOWN_CHAINS];
+    // Prefer a configured RPC; fall back to the known chain's public RPC so the
+    // app renders out-of-the-box. Only a truly unknown chain with no RPC throws.
+    const rpcUrl = readEnv(`RPC_URL_${chainId}`, env) ?? known?.rpcUrls.default.http[0];
     if (!rpcUrl) {
       throw new Error(`Missing RPC URL for chain ${chainId} (set RPC_URL_${chainId})`);
     }
-    const known = KNOWN_CHAINS[chainId as keyof typeof KNOWN_CHAINS];
     return { chainId, name: known?.name ?? `chain-${chainId}`, rpcUrl };
   });
 }

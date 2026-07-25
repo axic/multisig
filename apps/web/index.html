@@ -7,6 +7,28 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Last-resort visibility: if a module-eval or runtime error would leave a
+      // blank page, show the message instead of failing silently.
+      (function () {
+        function show(msg) {
+          var root = document.getElementById("root");
+          if (root && root.childElementCount === 0) {
+            root.innerHTML =
+              '<pre style="margin:2rem;padding:1rem;border:1px solid #f00;color:#b00;white-space:pre-wrap;font:14px/1.4 ui-monospace,monospace">' +
+              "App failed to start:\n\n" +
+              String(msg) +
+              "</pre>";
+          }
+        }
+        window.addEventListener("error", function (e) {
+          show((e.error && e.error.stack) || e.message);
+        });
+        window.addEventListener("unhandledrejection", function (e) {
+          show((e.reason && e.reason.stack) || e.reason);
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
