@@ -9,7 +9,14 @@
     "declaration": false,
     "declarationMap": false,
     "composite": false,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      // Web-only: resolve core from source (matches the Vite alias) so the web
+      // app needs no core build. Safe because web is built by Vite/tsc, not
+      // @vercel/node — unlike the api, which resolves deps via node_modules -> dist.
+      "@multisig/core": ["../../packages/core/src/index.ts"]
+    }
   },
   "include": ["src", "vite.config.ts"]
 }

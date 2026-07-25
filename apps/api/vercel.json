@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "pnpm --filter @multisig/db generate",
+  "buildCommand": "pnpm --filter @multisig/core build && pnpm --filter @multisig/db build",
   "outputDirectory": "public",
   "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
 }
