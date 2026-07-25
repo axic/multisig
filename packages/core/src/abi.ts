@@ -1,7 +1,7 @@
 import { concatHex, encodeAbiParameters, type Hex } from "viem";
-import { SELECTORS } from "./selectors";
-import type { Operation } from "./operations";
-import { encodeOperation } from "./operationCodec";
+import { SELECTORS } from "./selectors.js";
+import type { Operation } from "./operations.js";
+import { encodeOperation } from "./operationCodec.js";
 
 /**
  * Calldata builders for the multisig's outer entrypoints.

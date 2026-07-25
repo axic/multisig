@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
-import { api } from "../lib/api";
+import { api } from "../lib/api.js";
 
 export function WalletPage() {
   const { chainId, address } = useParams();

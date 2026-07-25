@@ -1,5 +1,5 @@
 import type { Hex } from "viem";
-import type { Operation, OperationKind } from "./operations";
+import type { Operation, OperationKind } from "./operations.js";
 
 /**
  * Operation signing-hash — the digest a relayed Signature must sign.

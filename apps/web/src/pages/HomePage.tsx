@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { api } from "../lib/api";
+import { api } from "../lib/api.js";
 
 export function HomePage() {
   const { data, isLoading, error } = useQuery({ queryKey: ["wallets"], queryFn: api.listWallets });

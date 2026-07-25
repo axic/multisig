@@ -1,5 +1,5 @@
 import type { Hex } from "viem";
-import type { Operation } from "./operations";
+import type { Operation } from "./operations.js";
 
 /**
  * Codec for the `Operation` (and later `Signature`) sum types.

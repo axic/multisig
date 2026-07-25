@@ -1,5 +1,5 @@
 import { handle } from "@hono/node-server/vercel";
-import { app } from "../src/app";
+import { app } from "../src/app.js";
 
 // Vercel Functions entrypoint (Node.js runtime). vercel.json rewrites all
 // paths here. We MUST use the @hono/node-server Vercel adapter (not

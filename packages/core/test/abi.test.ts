@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { encodeApprove, encodeExecute, encodeReject } from "../src/abi";
-import { encodeOperation } from "../src/operationCodec";
+import { encodeApprove, encodeExecute, encodeReject } from "../src/abi.js";
+import { encodeOperation } from "../src/operationCodec.js";
 import vectors from "./vectors/multisig.json" with { type: "json" };
 
 describe("outer entrypoint calldata (standard ABI)", () => {

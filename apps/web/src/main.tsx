@@ -3,11 +3,11 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { RouterProvider, createBrowserRouter } from "react-router-dom";
 import { WagmiProvider } from "wagmi";
-import { App } from "./App";
-import { CreateWalletPage } from "./pages/CreateWalletPage";
-import { HomePage } from "./pages/HomePage";
-import { WalletPage } from "./pages/WalletPage";
-import { wagmiConfig } from "./wagmi";
+import { App } from "./App.js";
+import { CreateWalletPage } from "./pages/CreateWalletPage.js";
+import { HomePage } from "./pages/HomePage.js";
+import { WalletPage } from "./pages/WalletPage.js";
+import { wagmiConfig } from "./wagmi.js";
 import "./index.css";
 
 const queryClient = new QueryClient();
