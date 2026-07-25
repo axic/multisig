@@ -1,4 +1,3 @@
-import { getDb } from "@multisig/db";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getAddress, isAddress } from "viem";
@@ -13,6 +12,20 @@ import { z } from "zod";
  * phase and the contract entrypoint it maps to.
  */
 export const app = new Hono();
+
+// Load the DB (and thus @prisma/client) lazily, inside the handlers that need
+// it — NOT at module top. On serverless a throw during module load (e.g. a
+// missing generated Prisma client in the bundle) crashes EVERY route with an
+// opaque FUNCTION_INVOCATION_FAILED, including /health. Deferring it keeps
+// /health alive and lets onError surface the real message from DB routes.
+const loadDb = async () => (await import("@multisig/db")).getDb();
+
+// Surface real errors instead of an opaque 500. Without this a thrown error
+// (bad DATABASE_URL, Prisma engine missing, …) reaches the client as a bare
+// crash with no message.
+app.onError((err, c) =>
+  c.json({ error: { name: err.name, message: err.message } }, 500),
+);
 
 // CORS allowlist. The production frontend + local dev are allowed by default;
 // add more origins via CORS_ORIGINS (comma-separated). Set
@@ -56,7 +69,7 @@ app.post("/v1/wallets", async (c) => {
   if (!parsed.success) return c.json({ error: parsed.error.flatten() }, 400);
 
   const { chainId, address, deployTxHash, label } = parsed.data;
-  const db = getDb();
+  const db = await loadDb();
   const wallet = await db.wallet.upsert({
     where: { chainId_address: { chainId, address: getAddress(address) } },
     create: { chainId, address: getAddress(address), deployTxHash, label },
@@ -66,7 +79,7 @@ app.post("/v1/wallets", async (c) => {
 });
 
 app.get("/v1/wallets", async (c) => {
-  const db = getDb();
+  const db = await loadDb();
   const wallets = await db.wallet.findMany({ orderBy: { createdAt: "desc" } });
   return c.json(wallets);
 });
@@ -77,7 +90,7 @@ app.get("/v1/wallets/:chainId/:address", async (c) => {
   if (!Number.isInteger(chainId) || !isAddress(addressRaw)) {
     return c.json({ error: "bad chainId/address" }, 400);
   }
-  const db = getDb();
+  const db = await loadDb();
   const wallet = await db.wallet.findUnique({
     where: { chainId_address: { chainId, address: getAddress(addressRaw) } },
     include: { signers: true },
