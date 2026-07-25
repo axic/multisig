@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EIP-712 Preimage Sidecar — Wallet Demo</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin: 0; padding: 1.5rem; max-width: 920px;
+      }
+      h1 { font-size: 1.1rem; }
+      .row { display: flex; flex-wrap: wrap; gap: .5rem; margin: .75rem 0; }
+      button {
+        font: inherit; padding: .5rem .75rem; cursor: pointer;
+        border: 1px solid currentColor; border-radius: 6px; background: transparent;
+      }
+      button:hover { filter: invert(0.08); }
+      #wallets button.selected { outline: 2px solid #08f; }
+      #status { margin: .5rem 0; font-weight: bold; }
+      pre {
+        white-space: pre-wrap; word-break: break-all;
+        border: 1px solid currentColor; border-radius: 6px;
+        padding: .75rem; height: 55vh; overflow: auto;
+      }
+      .hint { opacity: .7; }
+    </style>
+  </head>
+  <body>
+    <h1>EIP-712 Preimage Sidecar — Wallet Compatibility Demo</h1>
+    <p class="hint">
+      Button 7 needs no wallet. Buttons 1–4 send raw <code>eth_signTypedData_v4</code>
+      JSON to whichever wallet you pick — thrown errors are results, not failures.
+    </p>
+
+    <div><strong>Wallet (EIP-6963):</strong></div>
+    <div id="wallets" class="row"></div>
+    <div id="status">No wallet selected.</div>
+
+    <div class="row">
+      <button data-act="sign-plain">1. Sign — plain</button>
+      <button data-act="sign-sidecar">2. Sign — top-level sidecar</button>
+      <button data-act="sign-annotation">3. Sign — types annotation</button>
+      <button data-act="sign-mismatch">4. Sign — mismatched preimage</button>
+      <button data-act="invariance">7. Digest-invariance check (no wallet)</button>
+      <button data-act="clear">clear log</button>
+    </div>
+
+    <pre id="log"></pre>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
