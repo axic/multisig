@@ -76,16 +76,18 @@ for src in "${sources[@]}"; do
         exit 1
     fi
 
-    # 2. Back-end: Core IR -> Yul, both the deployable (creation) and runtime forms.
+    # 2. Back-end: Core IR -> Yul (deployable / creation form).
+    #    NOTE: we do NOT emit the runtime-only form (`yule --nodeploy`). On the
+    #    current solcore it produces Yul that references an undefined `_mainresult`
+    #    and fails to assemble; nothing here needs it — vm.getCode consumes the
+    #    creation bytecode, and deploying it installs the runtime code on-chain.
     $YULE_CMD "$hull" -o "$work/creation.yul"
-    $YULE_CMD "$hull" -o "$work/runtime.yul" --nodeploy
 
-    # 3. Assemble Yul -> EVM bytecode.
+    # 3. Assemble Yul -> EVM creation bytecode.
     creation="0x$($SOLC --strict-assembly --bin --optimize "$work/creation.yul" | tail -1 | tr -d '\n')"
-    runtime="0x$($SOLC --strict-assembly --bin --optimize "$work/runtime.yul" | tail -1 | tr -d '\n')"
 
     # 4. Emit a Foundry-shaped artifact. `bytecode.object` (creation code) is what
-    #    forge's vm.getCode reads; the ABI and runtime code are bundled for tooling.
+    #    forge's vm.getCode reads; the ABI is bundled for tooling / cast interface.
     abi='[]'
     if [[ -f "$work/$name.abi" ]]; then
         abi="$(cat "$work/$name.abi")"
@@ -93,8 +95,7 @@ for src in "${sources[@]}"; do
     jq -n \
         --argjson abi "$abi" \
         --arg creation "$creation" \
-        --arg runtime "$runtime" \
-        '{abi: $abi, bytecode: {object: $creation}, deployedBytecode: {object: $runtime}}' \
+        '{abi: $abi, bytecode: {object: $creation}}' \
         > "$out_dir/$name.json"
 
     echo "   -> solcore/out/$name.json"
