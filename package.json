@@ -5,7 +5,7 @@
   "description": "Safe-style multisig app (Solcore contract) — web + api + db",
   "packageManager": "pnpm@10.33.0",
   "engines": {
-    "node": ">=22"
+    "node": "24.x"
   },
   "scripts": {
     "build": "turbo run build",
