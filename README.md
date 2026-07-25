@@ -65,13 +65,16 @@ on-chain.** Consequences:
 ## Getting started
 
 ```bash
-pnpm install
+pnpm install                    # generates the Prisma client (apps/db postinstall)
 cp .env.example .env            # set DATABASE_URL + RPC_URL_11155111
-pnpm db:generate                # prisma client
-pnpm db:push                    # apply schema to Neon
-pnpm --filter @multisig/api dev # api on :8787
+pnpm db:push                    # apply schema to Neon (needed for the DB-backed routes)
+pnpm --filter @multisig/api dev # api on :8787  (/health works without a DB)
 pnpm --filter @multisig/web dev # web on :5173
 ```
+
+> The Prisma client is generated automatically on `pnpm install` via the
+> `apps/db` postinstall. If you ever see `Cannot find module '.prisma/client/*'`,
+> run `pnpm db:generate` (or just `pnpm install` again).
 
 Root tasks (Turbo): `pnpm build`, `pnpm typecheck`, `pnpm lint`, `pnpm test`.
 
