@@ -17,6 +17,10 @@
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["driverAdapters"]
+  // "native" for local dev; "rhel-openssl-3.0.x" is the query-engine binary for
+  // Vercel's Node (AWS Lambda) runtime — without it the API throws at runtime
+  // ("engine ... not found for the current platform") on Vercel.
+  binaryTargets   = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
