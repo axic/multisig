@@ -18,5 +18,6 @@ export {
 } from "./SignatureState.js";
 export { Address, Amount, Calldata } from "./data.js";
 export { Modal, type ModalProps } from "./Modal.js";
+export { ProposeModal, type ProposeModalProps } from "./ProposeModal.js";
 export { Toast, type ToastProps } from "./Toast.js";
 export { AppShell, type AppShellProps, type NavItem } from "./AppShell.js";

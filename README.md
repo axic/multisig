@@ -83,13 +83,33 @@ Root tasks (Turbo): `pnpm build`, `pnpm typecheck`, `pnpm lint`, `pnpm test`.
 - **Phase 0 (this scaffold)** — monorepo, DB schema, `packages/core` model +
   outer-ABI encoders + golden vectors, API skeleton (wallet register/list/get),
   web shell with wallet connect. ✅
-- **Phase 1** — deploy wallet (constructor: deployer = signer[0], required=1),
-  register it, read-through on-chain config (signers/required/nonce/balance).
-- **Phase 2** — implement the sum-type `operationCodec`, index operations from
-  chain, queue new operations.
-- **Phase 3** — execute flow incl. `UnstoredCall` preimage lookup/assembly;
-  indexer/cron to mark executed & advance nonce.
-- **Phase 4** — reject sibling flow + config ops (add/remove signer, change
-  threshold) surfaced in Settings.
-- **Phase 5** — relay signatures (blocked on `create_signature_hash`), EIP-1271
-  contract-signer support, multi-chain, batching.
+- **M1 / Phase 1** — deploy wallet (constructor: deployer = signer[0],
+  required=1), register it, view on-chain config (signers/threshold/nonce/
+  balance). ✅
+- **M2 / Phase 2** — sum-type `operationCodec` (verified against the golden
+  vectors), index operations, queue new operations, approve. ✅
+- **M3 / Phase 3** — execute (client-side, strict-order) + the DB indexer that
+  marks executed/skipped and advances the nonce. ✅
+- **M4 / Phase 4** — reject (terminal, executes as a skip) + config ops
+  (add/remove signer, change threshold) surfaced in the propose flow. ✅
+- **Phase 5 (not built)** — relay signatures (blocked on
+  `create_signature_hash`), `*WithSignature` entrypoints, EIP-1271
+  contract-signer support, batching.
+
+### What this pass covers (M1–M4)
+
+Only the **fully on-chain, direct-signer** entrypoints — `queue`, `approve`,
+`reject`, `execute` — sent straight from the connected signer. The relay
+(`*WithSignature`) and `batch` entrypoints are intentionally left for Phase 5.
+
+- **Deploy** is done **directly from the EOA** (not via
+  `contracts/src/WalletFactory`): the contract's constructor sets `signers[0] =
+  caller()` / `signers_required = 1`, so the deployer is the first signer. The
+  factory's CREATE2 deploy would instead make the factory the first signer, and
+  its `initialize`/`getOwner` calls aren't part of the multisig ABI. Set
+  `VITE_WALLET_CREATION_CODE` (from `contracts/` → `make wallet`) to enable it.
+- **The contract has no getters or events**, so the DB is a write-through
+  **index** of chain state: the web sends each `queue`/`approve`/`reject`/
+  `execute` tx and reports it to the API, which folds the operation log the same
+  way the contract's state machine does to derive owners / threshold / nonce /
+  status (`apps/api/src/indexer.ts`). It is rebuildable via `POST …/sync`.
