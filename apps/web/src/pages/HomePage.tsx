@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import { Address, QuorumMark } from "../components/index.js";
 import { api } from "../lib/api.js";
 
 export function HomePage() {
@@ -7,23 +8,42 @@ export function HomePage() {
 
   return (
     <section>
-      <h1 className="mb-4 text-xl font-semibold">Your multisig wallets</h1>
-      {isLoading && <p className="text-gray-500">Loading…</p>}
-      {error && <p className="text-red-600">Failed to load (is the API running?)</p>}
-      <ul className="space-y-2">
-        {data?.map((w) => (
-          <li key={w.id} className="rounded border p-3">
-            <Link to={`/wallet/${w.chainId}/${w.address}`} className="font-mono text-sm">
-              {w.label ? `${w.label} — ` : ""}
-              {w.address}
+      <h1 className="mb-6 text-[28px] font-bold tracking-tight">Your multisig wallets</h1>
+
+      {isLoading && <p className="font-mono text-sm text-muted">Loading…</p>}
+      {error && <p className="text-sm text-signal">Failed to load — is the API running?</p>}
+
+      {data && data.length === 0 && (
+        <p className="border border-line bg-paper p-6 text-sm text-body">No wallets yet.</p>
+      )}
+
+      {data && data.length > 0 && (
+        <div className="flex flex-col gap-px border border-line bg-line">
+          {data.map((w) => (
+            <Link
+              key={w.id}
+              to={`/wallet/${w.chainId}/${w.address}`}
+              className="flex items-center justify-between gap-4 bg-paper p-[18px] transition-colors hover:bg-panel"
+            >
+              <div className="flex min-w-0 items-center gap-3.5">
+                <QuorumMark signed={w.signersRequired} required={w.signersCount} size={28} />
+                <div className="flex min-w-0 flex-col gap-1">
+                  <span className="truncate text-sm font-medium">{w.label ?? "Wallet"}</span>
+                  <Address value={w.address} className="text-muted" />
+                </div>
+              </div>
+              <div className="flex-none text-right font-mono text-xs text-muted">
+                <div>
+                  {w.signersRequired} / {w.signersCount} signers
+                </div>
+                <div>
+                  chain {w.chainId} · nonce {w.nonce}
+                </div>
+              </div>
             </Link>
-            <div className="text-xs text-gray-500">
-              chain {w.chainId} · {w.signersRequired}/{w.signersCount} signers · nonce {w.nonce}
-            </div>
-          </li>
-        ))}
-        {data?.length === 0 && <li className="text-gray-500">No wallets yet.</li>}
-      </ul>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

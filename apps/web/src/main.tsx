@@ -5,6 +5,7 @@ import { RouterProvider, createBrowserRouter } from "react-router-dom";
 import { WagmiProvider } from "wagmi";
 import { App } from "./App.js";
 import { CreateWalletPage } from "./pages/CreateWalletPage.js";
+import { FoundationsPage } from "./pages/FoundationsPage.js";
 import { HomePage } from "./pages/HomePage.js";
 import { WalletPage } from "./pages/WalletPage.js";
 import { wagmiConfig } from "./wagmi.js";
@@ -19,6 +20,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <HomePage /> },
       { path: "new", element: <CreateWalletPage /> },
+      { path: "foundations", element: <FoundationsPage /> },
       { path: "wallet/:chainId/:address", element: <WalletPage /> },
     ],
   },
