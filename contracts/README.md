@@ -1,38 +1,155 @@
-# contracts
+# multisig
 
-The multisig contract is written in **Solcore** and lives in the compiler repo:
+A **mixed Solidity + [solcore](https://github.com/argotorg/solcore) (Core Solidity)** wallet setup, built on Foundry.
 
-- Source: `axic/solcore @ multisig-ethglobal-rebase`
-  → `test/examples/dispatch/multisig.solc`
-- Golden calldata vectors: same repo → `test/examples/dispatch/multisig.json`
-  (mirrored for the app at `packages/core/test/vectors/multisig.json`).
+The underlying wallet logic is written in **solcore**; the deployment / frontend
+layer is written in **Solidity**. The two languages never link at the source
+level — they interoperate over the ordinary Solidity ABI, exactly as two
+separately-deployed contracts would. This works because solcore emits standard
+4-byte selector dispatch and ABI-encoded args/returns, so a Solidity `interface`
+can call a solcore contract (and vice-versa) with no glue.
 
-This directory is a placeholder for how the app consumes the contract:
+## How the pieces fit
 
-- **ABI / selectors** — pinned in `packages/core/src/selectors.ts` from the
-  golden vectors (Solcore computes selectors itself; do not derive them from
-  Solidity-style signatures).
-- **Bytecode** — needed for the Phase 1 deploy flow. Produce it via the Solcore
-  pipeline (`sol-core` → `yule` → `solc`) and drop the runtime/deploy artifacts
-  here (or fetch from a build step). Track the exact solcore commit alongside the
-  bytecode so redeploys are reproducible.
+```
+solcore/src/Wallet.solc          the actual wallet (owner-gated `execute`)
+        │  sol-core → yule → solc --strict-assembly   (scripts/build-solcore.sh)
+        ▼
+solcore/out/Wallet.json          Foundry-shaped artifact { abi, bytecode.object }
+        │  vm.getCode(...)
+        ▼
+Solidity frontend ──────────────▶ deploys + calls the wallet over the ABI
+  ├─ src/WalletFactory.sol        Pattern A: CREATE2 factory (standalone wallets)
+  └─ src/WalletProxy.sol          Pattern B: EIP-1967 delegatecall proxy
+  interfaces/IWallet.sol          Solidity view of the solcore wallet's ABI
+```
 
-## Key contract facts the app relies on
+### The solcore wallet (`solcore/src/Wallet.solc`)
 
-- `constructor()` takes no args: the deployer becomes `signers[0]`,
-  `signers_required = 1`.
-- Entrypoints: `queue(Operation)`, `approve(uint256)`, `reject(uint256)`,
-  `execute(uint256, bytes)`, plus `*WithSignature` relay variants and
-  `isValidSignature(bytes32,bytes)` (EIP-1271 magic `0x1626ba7e`).
-- Operations execute in strict `nonce` order; `execute` on a `Rejected` op is a
-  no-op that advances the nonce.
-- `Operation` / `Signature` are sum types encoded with Solcore's non-standard
-  ABI — see `packages/core/src/operationCodec.ts`.
+A minimal single-owner smart account:
 
-## Open contract TODOs that gate app features
+- `initialize(address)` — one-shot; sets the owner (address(0) = uninitialized).
+- `getOwner() → address`
+- `execute(address to, uint256 value, bytes data) → bytes` — owner-only outbound
+  call, forwarding `value` from the wallet's balance.
 
-- `create_signature_hash` must include domain/chainId and real `abi.encode`
-  (currently hashes a constant) before signature relay can ship.
-- `emit log` events are TODO throughout — the indexer (Phase 3) will be simpler
-  and cheaper once operations/votes/execution emit events instead of requiring
-  storage scans.
+It is deliberately **initializer-based, not constructor-based**, so the exact
+same compiled runtime works both standalone and behind a delegatecall proxy.
+Its storage is the solcore default: sequential slots from 0, so `owner` is at
+**slot 0**.
+
+Custom-error selectors it reverts with:
+
+| Error                  | Selector     |
+| ---------------------- | ------------ |
+| `AlreadyInitialized()` | `0x0dc149f0` |
+| `ZeroOwner()`          | `0x9905827b` |
+| `Unauthorized()`       | `0x82b42900` |
+| `CallFailed()`         | `0x3204506f` |
+
+### Two frontend patterns
+
+**Pattern A — `WalletFactory` (CREATE2).** A Solidity factory holds the solcore
+wallet's creation bytecode and `create2`s standalone wallet instances, then
+`initialize`s each. Pure ABI interop; each wallet owns its own storage.
+
+**Pattern B — `WalletProxy` (EIP-1967 delegatecall).** The Solidity proxy *is*
+the account — it holds funds and delegatecalls the solcore wallet runtime, which
+therefore executes in the **proxy's** storage. Two constraints make this sound,
+both satisfied here:
+
+- The wallet owns low slots (`owner` at slot 0); the proxy keeps its
+  implementation pointer in the hashed **EIP-1967 slot**, which cannot collide.
+- Setup must go through `initialize()` (a delegatecalled function), never a
+  constructor — a constructor would write the implementation's storage at deploy
+  time, not the proxy's.
+
+`msg.sender` / `msg.value` / `address(this)` seen by the wallet resolve to the
+proxy context automatically (CALLER / CALLVALUE / ADDRESS opcodes) — correct for
+a wallet. `test/Proxy.t.sol` asserts the no-collision layout directly with
+`vm.load`.
+
+## Toolchain
+
+Everything is provided by a Nix dev shell that layers the solcore compiler on
+top of Foundry (`flake.nix` pins solcore as a flake input and re-exposes its
+`sol-core` + `yule` binaries alongside `foundry-bin`, `solc`, and `jq`):
+
+```sh
+nix develop            # sol-core, yule, forge, cast, solc, jq, make
+```
+
+The shell exports `SOLCORE_STD` (solcore's std library path) so the build script
+can find `import std.{*}`.
+
+## Build & test
+
+```sh
+# inside `nix develop` (or prefix each with `nix develop --command`)
+make wallet    # compile solcore/src/*.solc  -> solcore/out/*.json
+make build     # wallet + forge build
+make test      # wallet + forge test
+make fmt       # forge fmt
+make clean     # remove out/ and solcore/out/
+```
+
+`make test` always rebuilds the solcore artifacts first — `forge` has no native
+`.solc` hook, so bare `forge test` would run against stale/absent artifacts.
+`solcore/out/` is git-ignored (regenerated on demand).
+
+### Adding another solcore contract
+
+Drop `solcore/src/<Name>.solc` (one contract per file — sol-core names its Core
+IR output `output1.hull` per compile), run `make wallet`, and load it in tests
+with `SolcoreArtifact.deploy(vm, "<Name>")` /
+`SolcoreArtifact.creationCode(vm, "<Name>")`. Add a matching Solidity
+`interface` (selectors are standard; `cast interface solcore/out/<Name>.json`
+can generate one from the emitted ABI).
+
+## Extending the wallet toward a real multisig
+
+The wallet is intentionally a small, correct core. A full m-of-n multisig is a
+natural extension, all expressible in solcore today (its std exposes `ecrecover`,
+`keccak256`, mappings, and the full opcode surface):
+
+- store an owners set + threshold instead of a single `owner`;
+- add an `execute(...)` variant that takes a bundle of signatures, `ecrecover`s
+  each, and requires ≥ threshold distinct owner signatures over a nonce'd digest;
+- keep the same factory / proxy frontends unchanged.
+
+## Layout
+
+```
+flake.nix                  Nix dev shell (solcore compiler + Foundry)
+foundry.toml               Foundry config (+ fs_permissions for solcore/out)
+Makefile                   build orchestration
+scripts/build-solcore.sh   .solc -> Foundry artifact pipeline
+solcore/src/Wallet.solc    the solcore wallet
+solcore/out/               generated artifacts (git-ignored)
+src/                       Solidity frontend (factory, proxy)
+interfaces/IWallet.sol     ABI view of the wallet
+test/                      Foundry tests (Factory.t.sol, Proxy.t.sol)
+lib/forge-std/             Foundry std library (submodule)
+```
+
+> solcore is a research prototype and explicitly not production-ready; this repo
+> is experimental infrastructure for exploring the mixed-language workflow, not a
+> production wallet.
+
+## App integration (monorepo)
+
+This directory holds the on-chain half of the [`multisig`](../README.md) monorepo
+(`apps/`, `packages/`). The app consumes the compiled contract as follows:
+
+- **ABI / selectors** — solcore computes selectors itself; pin them in
+  `packages/core/src/selectors.ts` from the emitted ABI / golden vectors rather
+  than deriving them from Solidity-style signatures.
+- **Bytecode** — produced by the solcore pipeline here
+  (`sol-core` → `yule` → `solc`, via `make wallet` → `solcore/out/*.json`). Track
+  the exact solcore commit alongside any deployed bytecode so redeploys are
+  reproducible.
+
+> Note: the wallet in `solcore/src/Wallet.solc` is the minimal single-owner core
+> documented above. The full m-of-n multisig the app targets
+> (`axic/solcore` → `test/examples/dispatch/multisig.solc`) is the extension
+> sketched in [Extending the wallet toward a real multisig](#extending-the-wallet-toward-a-real-multisig).

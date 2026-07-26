@@ -21,3 +21,13 @@ apps/db/node_modules/.prisma/
 # editor / os
 .DS_Store
 *.log
+
+# contracts (Foundry + solcore)
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/solcore/out/
+
+# nix
+result
+result-*

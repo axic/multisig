@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The Foundry + solcore scaffolding lives under contracts/, so every `run`
+# step (flake.nix and the Makefile are there) executes from that directory.
+defaults:
+  run:
+    working-directory: contracts
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Cache Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      # Builds the solcore compiler (Haskell) on first run, then compiles the
+      # solcore wallet and runs the Foundry suite. `make test` handles the
+      # solcore -> artifact step before `forge test`.
+      - name: Build solcore artifacts + run tests
+        run: nix develop --command make test
+
+      - name: Check formatting
+        run: nix develop --command make fmt-check

@@ -1,0 +1,56 @@
+import std.{*};
+import std.dispatch.{*};
+import std.opcodes.{caller as caller_};
+
+// std exposes caller() only as a raw `word` opcode; wrap it as an `address`.
+// (Same shape as the helper in solcore's own ownable.solc / weth9.solc examples.)
+function caller() -> address {
+    return address(caller_());
+}
+
+// ---------------------------------------------------------------------------
+// Wallet — a minimal single-owner smart account, written in Core Solidity.
+//
+// This is the "underlying wallet" of the repo: the Solidity layer (a CREATE2
+// factory and/or an EIP-1967 delegatecall proxy) only ever *deploys* this and
+// talks to it over the ordinary Solidity ABI. See the repo README for how the
+// two languages compose.
+//
+// Storage layout (owned entirely by this contract, sequential from slot 0 —
+// this is why a delegatecall proxy must keep ITS own state in EIP-1967 slots):
+//   slot 0 : owner (address)
+//
+// Initialization is via `initialize(...)`, NOT the constructor, so the exact
+// same deployed runtime works both standalone (factory CREATE2) and behind a
+// delegatecall proxy — a constructor would write the implementation's storage
+// at deploy time, not the proxy's.
+// ---------------------------------------------------------------------------
+contract Wallet {
+    owner : address;
+
+    constructor() {}
+
+    // One-shot initializer. `owner == address(0)` is the "uninitialized" state;
+    // setting a non-zero owner locks it. Reverts on re-init or a zero owner.
+    public function initialize(newOwner : address) -> () {
+        require(owner == address(0), Error(0x0dc149f0));            // AlreadyInitialized()
+        require(!(newOwner == address(0)), Error(0x9905827b));      // ZeroOwner()
+        owner = newOwner;
+    }
+
+    public function getOwner() -> address {
+        return owner;
+    }
+
+    // Execute an arbitrary call from the wallet. Only the owner may call it;
+    // `value` (if any) is forwarded from the wallet's own balance. Reverts and
+    // bubbles nothing structured if the inner call fails.
+    public payable function execute(to : address, value : uint256, payload : memory(bytes)) -> memory(bytes) {
+        require(caller() == owner, Error(0x82b42900));             // Unauthorized()
+        match raw_call(to, value, payload) {
+        | (ok, ret) =>
+            require(ok, Error(0x3204506f));                        // CallFailed()
+            return ret;
+        }
+    }
+}
