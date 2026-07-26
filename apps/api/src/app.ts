@@ -31,7 +31,12 @@ app.onError((err, c) =>
 // add more origins via CORS_ORIGINS (comma-separated). Set
 // CORS_ALLOW_VERCEL_PREVIEWS=true to also allow this project's rotating Vercel
 // preview URLs (https://multisig-<hash>.vercel.app).
-const DEFAULT_ORIGINS = ["https://multisig-gold.vercel.app", "http://localhost:5173"];
+const DEFAULT_ORIGINS = [
+  "https://multisig-gold.vercel.app",
+  "http://localhost:5173",
+  "https://coram.finance",
+  "https://www.coram.finance",
+];
 const ALLOWED_ORIGINS = new Set([
   ...DEFAULT_ORIGINS,
   ...(process.env.CORS_ORIGINS ?? "")
