@@ -1,5 +1,16 @@
 import { defineChain } from "viem";
-import { sepolia } from "viem/chains";
+import {
+  base,
+  baseSepolia,
+  gnosis,
+  gnosisChiado,
+  mainnet,
+  optimism,
+  optimismSepolia,
+  polygon,
+  polygonAmoy,
+  sepolia,
+} from "viem/chains";
 
 /**
  * Chain + RPC configuration, resolved from environment.
@@ -18,7 +29,18 @@ export interface ChainConfig {
 }
 
 const KNOWN_CHAINS = {
+  // Mainnets
+  1: mainnet,
+  137: polygon,
+  100: gnosis,
+  10: optimism,
+  8453: base,
+  // Testnets (Polygon's current testnet is Amoy; Gnosis's is Chiado)
   11155111: sepolia,
+  80002: polygonAmoy,
+  10200: gnosisChiado,
+  11155420: optimismSepolia,
+  84532: baseSepolia,
 } as const;
 
 type EnvBag = Record<string, string | undefined>;
