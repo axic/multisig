@@ -10,6 +10,7 @@ import {
   polygon,
   polygonAmoy,
   sepolia,
+  anvil,
 } from "viem/chains";
 
 /**
@@ -41,6 +42,7 @@ const KNOWN_CHAINS = {
   10200: gnosisChiado,
   11155420: optimismSepolia,
   84532: baseSepolia,
+  31337: anvil,
 } as const;
 
 type EnvBag = Record<string, string | undefined>;
