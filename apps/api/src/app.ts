@@ -1,3 +1,4 @@
+import { makePublicClient, readWalletConfig, resolveChains } from "@multisig/core";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getAddress, isAddress } from "viem";
@@ -104,7 +105,55 @@ const later = (phase: string, note: string) => (c: import("hono").Context) =>
   c.json({ error: "not_implemented", phase, note }, 501);
 
 // Phase 1: read-through of on-chain config (signers/required/nonce).
-app.post("/v1/wallets/:chainId/:address/sync", later("1", "reconcile signers/required/nonce from RPC"));
+//
+// Builds a SERVER-SIDE public client (keeps RPC_URL_<id> off the browser),
+// reads the contract's view getters, and reconciles the DB cache that
+// GET /v1/wallets/:chainId/:address already returns. The chain is the source of
+// truth; Signer rows are fully replaced from on-chain each sync.
+app.post("/v1/wallets/:chainId/:address/sync", async (c) => {
+  const chainId = Number(c.req.param("chainId"));
+  const addressRaw = c.req.param("address");
+  if (!Number.isInteger(chainId) || !isAddress(addressRaw)) {
+    return c.json({ error: "bad chainId/address" }, 400);
+  }
+  const address = getAddress(addressRaw);
+
+  const chain = resolveChains(process.env).find((ch) => ch.chainId === chainId);
+  if (!chain) return c.json({ error: `chain ${chainId} not configured` }, 400);
+
+  const config = await readWalletConfig(makePublicClient(chain), address);
+
+  const db = await loadDb();
+  const wallet = await db.wallet.upsert({
+    where: { chainId_address: { chainId, address } },
+    create: {
+      chainId,
+      address,
+      signersCount: config.signersCount,
+      signersRequired: config.signersRequired,
+      nonce: config.nonce,
+    },
+    update: {
+      signersCount: config.signersCount,
+      signersRequired: config.signersRequired,
+      nonce: config.nonce,
+    },
+  });
+
+  // Replace the cached signer set (on-chain is authoritative).
+  await db.signer.deleteMany({ where: { walletId: wallet.id } });
+  if (config.signers.length > 0) {
+    await db.signer.createMany({
+      data: config.signers.map((signer, index) => ({ walletId: wallet.id, address: signer, index })),
+    });
+  }
+
+  const synced = await db.wallet.findUnique({
+    where: { id: wallet.id },
+    include: { signers: { orderBy: { index: "asc" } } },
+  });
+  return c.json(synced);
+});
 // Phase 2: index + propose. queue(Operation) needs the sum-type codec.
 app.get("/v1/wallets/:chainId/:address/operations", later("2", "index of on-chain operations + votes"));
 app.post("/v1/wallets/:chainId/:address/operations", later("2", "build queue(Operation) calldata"));

@@ -4,3 +4,6 @@ export * from "./abi.js";
 export * from "./operationCodec.js";
 export * from "./hash.js";
 export * from "./chains.js";
+export * from "./contract/abi.js";
+export * from "./contract/bytecode.js";
+export * from "./contract/read.js";
