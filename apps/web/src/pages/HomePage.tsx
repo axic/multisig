@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Address, QuorumMark } from "../components/index.js";
 import { api } from "../lib/api.js";
+import { formatWei } from "../lib/format.js";
 
 export function HomePage() {
   const { data, isLoading, error } = useQuery({ queryKey: ["wallets"], queryFn: api.listWallets });
@@ -37,7 +38,7 @@ export function HomePage() {
                   {w.signersRequired} / {w.signersCount} signers
                 </div>
                 <div>
-                  chain {w.chainId} · nonce {w.nonce}
+                  {formatWei(w.balanceWei)} ETH · chain {w.chainId} · nonce {w.nonce}
                 </div>
               </div>
             </Link>

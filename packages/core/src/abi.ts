@@ -1,4 +1,4 @@
-import { concatHex, encodeAbiParameters, type Hex } from "viem";
+import { concatHex, encodeAbiParameters, getAddress, type Address, type Hex } from "viem";
 import { SELECTORS } from "./selectors.js";
 import type { Operation } from "./operations.js";
 import { encodeOperation } from "./operationCodec.js";
@@ -9,8 +9,17 @@ import { encodeOperation } from "./operationCodec.js";
  * The OUTER layer (nonce / bytes args) is standard Solidity ABI and is fully
  * implemented + covered by the golden vectors. The `Operation` argument of
  * queue() uses Solcore's non-standard sum encoding and is delegated to
- * ./operationCodec.ts (still a stub — see there).
+ * ./operationCodec.ts.
  */
+
+/**
+ * initialize(address owner) — the proxy-pattern "constructor". Must be called
+ * once after deploying the Multisig runtime; it sets `owner` as signer[0] with
+ * threshold 1 (reverts if already initialized).
+ */
+export function encodeInitialize(owner: Address): Hex {
+  return concatHex([SELECTORS.initialize, encodeAbiParameters([{ type: "address" }], [getAddress(owner)])]);
+}
 
 /** approve(uint256 nonce) */
 export function encodeApprove(nonce: bigint): Hex {

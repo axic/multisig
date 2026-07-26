@@ -12,6 +12,8 @@ import type { Hex } from "viem";
 export const SELECTORS = {
   /** queue(Operation) */
   queue: "0x4ae6f8ce",
+  /** initialize(address owner) — the proxy-pattern "constructor" (sets signer[0]) */
+  initialize: "0xc4d66de8",
   /** approve(uint256 nonce) */
   approve: "0xb759f954",
   /** reject(uint256 nonce) */

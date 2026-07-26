@@ -25,3 +25,18 @@ export function formatAmount(value: number | string, decimals = 6): string {
   if (!Number.isFinite(n)) return "—";
   return n.toFixed(decimals);
 }
+
+/** A wei decimal string as ETH, fixed six decimals (tabular). */
+export function formatWei(wei: string | bigint, decimals = 6): string {
+  let v: bigint;
+  try {
+    v = typeof wei === "bigint" ? wei : BigInt(wei || "0");
+  } catch {
+    return "—";
+  }
+  const base = 10n ** 18n;
+  const whole = v / base;
+  const frac = v % base;
+  const fracStr = frac.toString().padStart(18, "0").slice(0, decimals);
+  return `${whole.toString()}.${fracStr}`;
+}

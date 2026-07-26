@@ -1,25 +1,24 @@
 // Prisma schema for the multisig app.
 //
-// Contract reference: axic/solcore @ multisig-ethglobal-rebase
-//   test/examples/dispatch/multisig.solc
+// Contract: contracts/solcore/src/Wallet.solc — the `Multisig` contract. It
+// keeps signers, the operation queue, votes, status and the nonce ON-CHAIN.
+// But the contract exposes NO public getters (all storage is internal, and
+// it emits no events yet — the "TODO: emit log" markers), so the frontend
+// cannot read that state back. This DB is therefore an INDEX that the app
+// writes through on every successful tx: seeded at deploy (signer[0] = creator,
+// required = 1, nonce = 0) and advanced as we queue / approve / reject /
+// execute. Balance is the one fact read straight from chain (via /sync).
 //
-// Unlike Safe, this contract stores queued operations, votes, and status
-// ON-CHAIN. So most of this schema is an INDEX/CACHE that is rebuildable from
-// chain events — the UI reads it for speed and history, but the chain is the
-// source of truth. Two tables hold data that genuinely lives only off-chain:
-//
-//   * UnstoredCallPreimage — the preimage of an `UnstoredCall(bytes32)` op.
-//     The chain stores only the hash; the preimage MUST be supplied at
-//     execute() time. Lose it and the op can never be executed.
+// Two tables hold data that only ever lives off-chain:
+//   * UnstoredCallPreimage — the preimage of an `UnstoredCall(bytes32)` op. The
+//     chain stores only the hash; the preimage MUST be supplied at execute()
+//     time. Lose it and the op can never be executed.
 //   * RelaySignature — off-chain signatures collected for the *WithSignature
-//     relay entrypoints, before anyone submits them on-chain.
+//     relay entrypoints, before anyone submits them (a later phase).
 
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["driverAdapters"]
-  // "native" for local dev; "rhel-openssl-3.0.x" is the query-engine binary for
-  // Vercel's Node (AWS Lambda) runtime — without it the API throws at runtime
-  // ("engine ... not found for the current platform") on Vercel.
   binaryTargets   = ["native", "rhel-openssl-3.0.x"]
 }
 
@@ -28,19 +27,22 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// A deployed multisig instance. `chainId` is first-class for multi-chain.
+// A deployed Multisig instance. `chainId` is first-class for multi-chain.
 model Wallet {
-  id             String   @id @default(cuid())
-  chainId        Int
-  address        String // checksummed contract address
-  deployTxHash   String?
-  label          String?
-  createdAt      DateTime @default(now())
+  id           String  @id @default(cuid())
+  chainId      Int
+  address      String // checksummed contract address
+  deployTxHash String?
+  label        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  // cached on-chain config (reconciled by the indexer)
-  signersCount    Int @default(0)
-  signersRequired Int @default(0)
-  nonce           Int @default(0) // next executable operation index
+  // Cached on-chain config (write-through from our own txs; seeded at deploy).
+  signersCount    Int    @default(1)
+  signersRequired Int    @default(1)
+  nonce           Int    @default(0) // next executable operation index
+  operationsCount Int    @default(0) // total queued (next queue slot)
+  balanceWei      String @default("0") // read from chain via /sync
 
   signers    Signer[]
   operations Operation[]
@@ -64,7 +66,7 @@ model Signer {
 
 // Index of an on-chain queued operation. `index` is its position in the
 // contract's strict execution sequence (the value passed to approve/reject/
-// execute). Voting and status are cached from chain.
+// execute). Voting and status are cached from our own txs.
 model Operation {
   id       String @id @default(cuid())
   walletId String
@@ -73,13 +75,13 @@ model Operation {
   kind    String // OperationTag: AddSigner | ... | UnstoredCall | ...
   decoded Json // decoded fields for display (target, value, amount, hash, ...)
 
-  status      String @default("Approvals") // Approvals | Rejected | Executed
-  approvals   Int    @default(0)
-  proposer    String? // signer that queued it (if known)
+  status    String  @default("Approvals") // Approvals | Rejected | Executed
+  approvals Int     @default(0)
+  proposer  String? // signer that queued it (if known)
 
   createdTxHash  String?
   executedTxHash String?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
   executedAt     DateTime?
 
   wallet Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
@@ -89,7 +91,7 @@ model Operation {
   @@index([walletId, status])
 }
 
-// Cache of a single signer's on-chain vote on an operation.
+// Cache of a single signer's vote on an operation.
 model Vote {
   id          String @id @default(cuid())
   operationId String
@@ -101,16 +103,16 @@ model Vote {
 }
 
 // THE preimage store. Keyed by the hash the contract holds on-chain for an
-// UnstoredCall. The preimage is `[address target][uint256 value][bytes payload]`
-// and is what must be handed to execute(nonce, payload).
+// UnstoredCall. The preimage is `[32:target][32:value][inner calldata]` and is
+// what must be handed to execute(nonce, payload).
 model UnstoredCallPreimage {
-  id        String @id @default(cuid())
-  walletId  String
-  hash      String // keccak256(preimage) — matches the on-chain UnstoredCall hash
+  id       String @id @default(cuid())
+  walletId String
+  hash     String // keccak256(preimage) — matches the on-chain UnstoredCall hash
 
-  target    String
-  value     String // wei, decimal string
-  payload   String // 0x… inner calldata
+  target  String
+  value   String // wei, decimal string
+  payload String // 0x… inner calldata (may be 0x for a plain value transfer)
 
   createdBy String?
   createdAt DateTime @default(now())
@@ -121,20 +123,19 @@ model UnstoredCallPreimage {
 }
 
 // Off-chain signature collected for a relay entrypoint (queue/approve/reject
-// WithSignature), before submission. `operationPayload` carries the not-yet-
-// on-chain operation for a relayed Queue.
+// WithSignature), before submission. Reserved for the relay phase.
 model RelaySignature {
   id       String @id @default(cuid())
   walletId String
 
-  opKind         String // OperationKind: Queue | Approve | Reject
-  operationIndex Int? // for Approve/Reject of an existing op
+  opKind           String // OperationKind: Queue | Approve | Reject
+  operationIndex   Int? // for Approve/Reject of an existing op
   operationPayload Json? // for Queue (op not yet on-chain)
 
   sigType   String // ECDSA | Contract | EIP1271
   signer    String
   signature String // encoded Signature bytes (r/s, contract addr, or 1271 blob)
-  hash      String // the signing hash this authorises (once the scheme is real)
+  hash      String // the EIP-712 signing hash this authorises
 
   createdAt DateTime @default(now())
 

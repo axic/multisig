@@ -47,20 +47,21 @@ on-chain.** Consequences:
 2. **Relayed signatures** collected for `*WithSignature` before submission.
    Stored in `RelaySignature`.
 
-## Contract-side gaps that block features (as of the referenced branch)
+## Contract ABI notes
 
-- **`create_signature_hash` is a stub** — it hashes a constant
-  (`keccak256(bytes32(1))`), with `// TODO: include domain/chainId` and
-  `abi.encode` noted as not working. Until it computes a real (ideally EIP-712)
-  digest, the **signature-relay feature set cannot be built correctly.**
-  `packages/core/src/hash.ts` throws on purpose so nothing fabricates a mismatched
-  hash. Direct signer calls (`queue`/`approve`/`reject`/`execute`) are unaffected.
-- **`Operation`/`Signature` use Solcore's non-standard sum-type ABI**
-  (sum-wide-product / nested binary sum), not standard Solidity ABI. The golden
-  vectors in `packages/core/test/vectors/multisig.json` are the source of truth
-  for implementing `operationCodec.ts` (Phase 2). `encodeOperation` throws until
-  then; the outer `approve`/`reject`/`execute` encoders are standard ABI, done,
-  and covered by tests.
+- **`create_signature_hash` is a real EIP-712 digest** on the `wallet` branch:
+  domain `Multisig`/`1`/chainId/verifyingContract, message
+  `MultisigOperation(uint256 kind,bytes operation)` with a flat `[tag][fields]`
+  operation preimage. Implemented in `packages/core/src/hash.ts` (mirrors the
+  contract; used by the relay layer, a later phase).
+- **`Operation` uses Solcore's non-standard sum-type ABI** — a right-nested
+  binary sum ("sum-wide-product"): variant *k* is *k* `inr` (`1`) tag words then
+  an `inl` (`0`), the field words, zero-padded to a fixed 10-word width.
+  Implemented + validated against `packages/core/test/vectors/multisig.json` in
+  `operationCodec.ts`. The dynamic `Call(address,uint256,bytes)` variant isn't
+  representable by the static encoder, so arbitrary calls are queued as
+  `UnstoredCall` (hash on-chain + preimage in the DB). `approve`/`reject`/
+  `execute` are standard ABI.
 
 ## Getting started
 
@@ -78,18 +79,44 @@ pnpm --filter @multisig/web dev # web on :5173
 
 Root tasks (Turbo): `pnpm build`, `pnpm typecheck`, `pnpm lint`, `pnpm test`.
 
-## Phased plan
+## Shipped model — on-chain Multisig (M1–M4)
 
-- **Phase 0 (this scaffold)** — monorepo, DB schema, `packages/core` model +
-  outer-ABI encoders + golden vectors, API skeleton (wallet register/list/get),
-  web shell with wallet connect. ✅
-- **Phase 1** — deploy wallet (constructor: deployer = signer[0], required=1),
-  register it, read-through on-chain config (signers/required/nonce/balance).
-- **Phase 2** — implement the sum-type `operationCodec`, index operations from
-  chain, queue new operations.
-- **Phase 3** — execute flow incl. `UnstoredCall` preimage lookup/assembly;
-  indexer/cron to mark executed & advance nonce.
-- **Phase 4** — reject sibling flow + config ops (add/remove signer, change
-  threshold) surfaced in Settings.
-- **Phase 5** — relay signatures (blocked on `create_signature_hash`), EIP-1271
-  contract-signer support, multi-chain, batching.
+The app drives the real on-chain **`Multisig`** contract
+(`contracts/solcore/src/Wallet.solc`, the `Multisig` contract): signers, the
+operation queue, votes, status and the nonce all live on-chain. It uses the
+proxy pattern — deploy the runtime, then `initialize(owner)` sets the caller as
+signer #0 with threshold 1; more signers and a higher threshold are added via
+queued `AddSigner` / `ChangeSigRequired` operations.
+
+Because the contract exposes **no getters and emits no events yet**, the
+frontend can't read that state back. So the DB is a **write-through index**:
+seeded at deploy, then updated on each successful queue/approve/reject/execute
+the web app performs. The one fact read straight from chain is the balance
+(`/sync`). Two things live only off-chain: `UnstoredCall` preimages and (later)
+relayed signatures.
+
+Calldata is built in `packages/core` and sent as raw transactions:
+
+- `queue(Operation)` — sum-type codec (`operationCodec.ts`, 10-word nested
+  binary sum), validated against the golden vectors. Send-ETH uses the native
+  `TransferEth` op; an arbitrary call is queued as `UnstoredCall` (hash on-chain,
+  `[target][value][data]` preimage stored in the DB and supplied at execute).
+- `approve(nonce)` / `reject(nonce)` / `execute(nonce, payload)` — standard ABI.
+- Strict sequential execution: only the op at `nonce` can execute; a rejected op
+  executes as a skip that advances the nonce.
+
+### Milestones
+
+- **Phase 0** — monorepo, DB, `packages/core` skeleton, API + web shell. ✅
+- **M1** — connect, deploy the `Multisig` (bytecode + `initialize`) or track an
+  existing address, view
+  signers / threshold / nonce / balance. ✅
+- **M2** — queue a tx (`TransferEth` or `UnstoredCall` + preimage), approve
+  (on-chain signer call), queue list. ✅
+- **M3** — execute (anyone, supplying the `UnstoredCall` preimage as payload),
+  advance the nonce; status + history. ✅
+- **M4** — reject (marks the op, executed as a skip), plus signer/threshold
+  management ops surfaced in Settings. ✅
+- **M5** *(deferred)* — the relay layer (`queue/approve/rejectWithSignature`,
+  EIP-2098 / approved-hash / EIP-1271 signatures) and `batch`. The EIP-712
+  signing digest they need is already implemented in `packages/core/src/hash.ts`.
