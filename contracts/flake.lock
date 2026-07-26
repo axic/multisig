@@ -113,11 +113,11 @@
         "nixpkgs": "nixpkgs"
       },
       "locked": {
-        "lastModified": 1785037542,
-        "narHash": "sha256-40UYv6mkz2NZd7bNys0Fp588nA3+zQ1k8CwDftLjuuw=",
+        "lastModified": 1785080332,
+        "narHash": "sha256-grjc65PWg+S5C0oF5VMc5M/Q0FqJzIiVcxPmiBDVbic=",
         "owner": "axic",
         "repo": "solcore",
-        "rev": "fb6b0c000282401381c159155cc4a0783089916f",
+        "rev": "ed9134a5d58ff5d7694c57298fb46b61f54cb261",
         "type": "github"
       },
       "original": {
