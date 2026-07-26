@@ -1,5 +1,5 @@
 import { Outlet } from "react-router-dom";
-import { useAccount } from "wagmi";
+import { ChainSelector } from "./ChainSelector.js";
 import { ConnectWallet } from "./ConnectWallet.js";
 import { AppShell, type NavItem } from "./components/index.js";
 
@@ -10,13 +10,12 @@ const NAV: NavItem[] = [
 ];
 
 export function App() {
-  const { chain } = useAccount();
   return (
     <AppShell
       nav={NAV}
       actions={
         <>
-          <span className="font-mono text-[11px] text-muted">{chain?.name ?? "not connected"}</span>
+          <ChainSelector />
           <ConnectWallet />
         </>
       }
