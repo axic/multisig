@@ -115,9 +115,12 @@ contract Multisig {
     nonce: uint256; // Strict ordering. Next executable operation.
     approved_signed_hashes: mapping(bytes32, bool);
 
-    constructor() {
-        // The creator becomes the first signer.
-        signers[uint256(0)] = caller();
+    // The "constructor" for the factory.
+    public function initialize(owner: address) -> () {
+        // This is the appendDelegatecallCheck in Solidity. There is no language support for this yet.
+        // require(deployTimeAddress() == address(),, Error(0x12345678)); // MustBeInitializedViaProxy()
+        require(signers_count == 0, Error(0x12345678)); // AlreadyInitialized()
+        signers[uint256(0)] = owner;
         signers_count = 1;
         signers_required = 1;
     }
