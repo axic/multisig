@@ -18,6 +18,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "gen:bytecode": "node scripts/gen-bytecode.mjs",
+    "check:bytecode": "node scripts/gen-bytecode.mjs && git diff --exit-code src/generated/multisigBytecode.ts",
     "lint": "echo \"(lint: TODO)\""
   },
   "dependencies": {

@@ -105,6 +105,23 @@ Calldata is built in `packages/core` and sent as raw transactions:
 - Strict sequential execution: only the op at `nonce` can execute; a rejected op
   executes as a skip that advances the nonce.
 
+### Deploy bytecode
+
+The `Multisig` creation bytecode is **hardcoded** in
+`packages/core/src/generated/multisigBytecode.ts`, so deploy works with zero
+config. It is generated from the solcore artifact — never hand-edited:
+
+```bash
+nix develop -c make -C contracts wallet    # solcore -> contracts/solcore/out/Wallet.json
+pnpm --filter @multisig/core gen:bytecode  # artifact -> the generated constant
+```
+
+`VITE_MULTISIG_CREATION_CODE` remains only as an override (custom/pre-release
+build). CI keeps the constant honest — the artifact is already built in `ci.yml`,
+so add `pnpm --filter @multisig/core check:bytecode` (regenerates and
+`git diff --exit-code`s) to fail when the contract changed but the constant
+wasn't regenerated. The committed constant is empty until the pipeline first runs.
+
 ### Milestones
 
 - **Phase 0** — monorepo, DB, `packages/core` skeleton, API + web shell. ✅
