@@ -12,7 +12,7 @@ can call a solcore contract (and vice-versa) with no glue.
 ## How the pieces fit
 
 ```
-solcore/src/Wallet.solc          the actual wallet (owner-gated `execute`)
+solcore/src/Wallet.solc          the actual wallet (m-of-n multisig)
         │  sol-core → yule → solc --strict-assembly   (scripts/build-solcore.sh)
         ▼
 solcore/out/Wallet.json          Foundry-shaped artifact { abi, bytecode.object }
@@ -22,30 +22,39 @@ Solidity frontend ──────────────▶ deploys + calls 
   ├─ src/WalletFactory.sol        Pattern A: CREATE2 factory (standalone wallets)
   └─ src/WalletProxy.sol          Pattern B: EIP-1967 delegatecall proxy
   interfaces/IWallet.sol          Solidity view of the solcore wallet's ABI
+  test/MultisigOps.sol            calldata builder for the sum-typed entrypoints
 ```
 
 ### The solcore wallet (`solcore/src/Wallet.solc`)
 
-A minimal single-owner smart account:
+An m-of-n multisig smart account. Operations (`AddSigner`, `RemoveSigner`,
+`ChangeSigRequired`, `TransferEth`, `TransferToken`, `Call`, …) are `queue`d,
+`approve`d by enough signers, then `execute`d in strict nonce order:
 
-- `initialize(address)` — one-shot; sets the owner (address(0) = uninitialized).
-- `getOwner() → address`
-- `execute(address to, uint256 value, bytes data) → bytes` — owner-only outbound
-  call, forwarding `value` from the wallet's balance.
+- `initialize(address owner)` — one-shot "constructor for the factory"; registers
+  `owner` as the sole signer with a 1-of-1 threshold. Reverts once a signer exists.
+- `queue(Operation)` / `approve(uint256)` / `reject(uint256)` — signer-gated.
+- `execute(uint256 nonce, bytes payload)` — anyone, once approvals ≥ threshold.
+- `queueWithSignature` / `approveWithSignature` / `rejectWithSignature` /
+  `batch` — signature-relayed and batched variants.
+- `isValidSignature(bytes32,bytes) → bytes4` — ERC-1271 receiver.
+- payable `fallback` — accepts bare ETH transfers (empty calldata).
 
 It is deliberately **initializer-based, not constructor-based**, so the exact
 same compiled runtime works both standalone and behind a delegatecall proxy.
-Its storage is the solcore default: sequential slots from 0, so `owner` is at
-**slot 0**.
+Its storage is the solcore default: sequential slots from 0, so `signers` (a
+mapping) is at **slot 0**, `signers_count` at **slot 1**, `signers_required` at
+**slot 2**.
 
-Custom-error selectors it reverts with:
-
-| Error                  | Selector     |
-| ---------------------- | ------------ |
-| `AlreadyInitialized()` | `0x0dc149f0` |
-| `ZeroOwner()`          | `0x9905827b` |
-| `Unauthorized()`       | `0x82b42900` |
-| `CallFailed()`         | `0x3204506f` |
+**Selectors and errors.** `initialize`, `approve`, `reject`, `execute`, and
+`isValidSignature` take value types, so solcore's selector coincides with
+Solidity's and a plain `interface` calls them (see `interfaces/IWallet.sol`).
+`queue` and the `*WithSignature` variants take solcore *sum types* with no
+Solidity spelling and structural, non-standard selectors — `test/MultisigOps.sol`
+pins those selectors and assembles the nested-sum calldata. This research
+prototype reverts **every** error with the same 4-byte code `0x12345678`
+(`NotASigner`, `OperationNotFound`, `AlreadyInitialized`, …, are not yet
+distinguished), so tests assert against that single `MultisigOps.ERROR`.
 
 ### Two frontend patterns
 
@@ -58,8 +67,9 @@ the account — it holds funds and delegatecalls the solcore wallet runtime, whi
 therefore executes in the **proxy's** storage. Two constraints make this sound,
 both satisfied here:
 
-- The wallet owns low slots (`owner` at slot 0); the proxy keeps its
-  implementation pointer in the hashed **EIP-1967 slot**, which cannot collide.
+- The wallet owns low slots (`signers` mapping at slot 0, `signers_count` at 1,
+  `signers_required` at 2); the proxy keeps its implementation pointer in the
+  hashed **EIP-1967 slot**, which cannot collide.
 - Setup must go through `initialize()` (a delegatecalled function), never a
   constructor — a constructor would write the implementation's storage at deploy
   time, not the proxy's.
@@ -106,16 +116,16 @@ with `SolcoreArtifact.deploy(vm, "<Name>")` /
 `interface` (selectors are standard; `cast interface solcore/out/<Name>.json`
 can generate one from the emitted ABI).
 
-## Extending the wallet toward a real multisig
+## The multisig itself
 
-The wallet is intentionally a small, correct core. A full m-of-n multisig is a
-natural extension, all expressible in solcore today (its std exposes `ecrecover`,
-`keccak256`, mappings, and the full opcode surface):
-
-- store an owners set + threshold instead of a single `owner`;
-- add an `execute(...)` variant that takes a bundle of signatures, `ecrecover`s
-  each, and requires ≥ threshold distinct owner signatures over a nonce'd digest;
-- keep the same factory / proxy frontends unchanged.
+The wallet is a full m-of-n multisig (queue → approve → execute over a stored
+operation set, with signature-relayed and batched variants and an ERC-1271
+receiver). It reuses the same factory / proxy frontends unchanged, because it
+kept the `initialize(address owner)` lifecycle: a fresh wallet is a 1-of-1
+multisig owned by `owner`, which then grows its signer set / raises its threshold
+through queued `AddSigner` / `ChangeSigRequired` operations. The signature and
+batching layers (`*WithSignature`, `batch`) exercise `ecrecover`, EIP-712
+digests, approved-hash and EIP-1271 signer checks.
 
 ## Layout
 
@@ -128,7 +138,7 @@ solcore/src/Wallet.solc    the solcore wallet
 solcore/out/               generated artifacts (git-ignored)
 src/                       Solidity frontend (factory, proxy)
 interfaces/IWallet.sol     ABI view of the wallet
-test/                      Foundry tests (Factory.t.sol, Proxy.t.sol)
+test/                      Foundry tests (Factory.t.sol, Proxy.t.sol, MultisigOps.sol)
 lib/forge-std/             Foundry std library (submodule)
 ```
 
@@ -149,7 +159,9 @@ This directory holds the on-chain half of the [`multisig`](../README.md) monorep
   the exact solcore commit alongside any deployed bytecode so redeploys are
   reproducible.
 
-> Note: the wallet in `solcore/src/Wallet.solc` is the minimal single-owner core
-> documented above. The full m-of-n multisig the app targets
-> (`axic/solcore` → `test/examples/dispatch/multisig.solc`) is the extension
-> sketched in [Extending the wallet toward a real multisig](#extending-the-wallet-toward-a-real-multisig).
+> Note: the wallet in `solcore/src/Wallet.solc` is the full m-of-n multisig,
+> imported from `axic/solcore` → `test/examples/dispatch/multisig.solc` and
+> adapted with an `initialize(address)` lifecycle so the factory / proxy
+> frontends deploy it. Pin its structural selectors from the emitted ABI (or
+> from `test/MultisigOps.sol`) rather than deriving them Solidity-style, since
+> the sum-typed entrypoints do not use standard signatures.

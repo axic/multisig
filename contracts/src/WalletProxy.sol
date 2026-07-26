@@ -8,7 +8,8 @@ pragma solidity ^0.8.28;
 ///      solcore-compiled wallet logic. Because the delegatecall runs the wallet
 ///      code in THIS contract's storage context:
 ///        - all wallet state lives here, in the slots the solcore layout owns
-///          (sequential from slot 0 -> `owner` at slot 0);
+///          (sequential from slot 0 -> `signers` mapping at slot 0,
+///          `signers_count` at 1, `signers_required` at 2);
 ///        - the implementation address is kept in the EIP-1967 slot, a hashed
 ///          high slot that cannot collide with the wallet's low slots;
 ///        - the wallet must be set up via `initialize(...)` (a delegatecalled
