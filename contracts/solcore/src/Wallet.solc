@@ -115,6 +115,38 @@ contract Multisig {
     nonce: uint256; // Strict ordering. Next executable operation.
     approved_signed_hashes: mapping(bytes32, bool);
 
+    // Getters.
+    public function getSignersRequired() -> uint256 {
+        return signers_required;
+    }
+    public function getSignersCount() -> uint256 {
+        return signers_count;
+    }
+    public function getSigner(i: uint256) -> address {
+        return signers[i];
+    }
+    public function getNonce() -> uint256 {
+        return nonce;
+    }
+    public function getOperationsCount() -> uint256 {
+        return operations_count;
+    }
+    public function getOperation(i: uint256) -> Operation {
+        return operations[i];
+    }
+    public function getStatus(i: uint256) -> OperationStatus {
+        return status[i];
+    }
+    public function getVote(i: uint256, signer: address) -> Vote {
+        return votes[i][signer];
+    }
+    public function isHashApproved(hash: bytes32) -> bool {
+        return approved_signed_hashes[hash];
+    }
+    public function getSignatureHash(kind: OperationKind, op: Operation) -> bytes32 {
+        return create_signature_hash(kind, op);
+    }
+
     // The "constructor" for the factory.
     public function initialize(owner: address) -> () {
         // This is the appendDelegatecallCheck in Solidity. There is no language support for this yet.
@@ -405,7 +437,7 @@ contract Multisig {
     // TODO: these functions should be non-public
 
     // TODO: this is suboptimal
-    function isSigner(signer: address) -> bool {
+    public function isSigner(signer: address) -> bool {
         for (let i = 0; i < signers_count; i += 1) {
             if (signers[i] == signer) {
                 return true;
