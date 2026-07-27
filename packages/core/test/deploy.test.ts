@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveCreationCode } from "../src/deploy.js";
+import { MULTISIG_CREATION_CODE } from "../src/generated/multisigBytecode.js";
 
 describe("resolveCreationCode", () => {
   it("prefers an env override over the hardcoded constant", () => {
@@ -8,15 +9,16 @@ describe("resolveCreationCode", () => {
     expect(resolveCreationCode({ MULTISIG_CREATION_CODE: code })).toBe(code);
   });
 
-  it("adds a 0x prefix and rejects junk", () => {
+  it("adds a 0x prefix to a valid override", () => {
     expect(resolveCreationCode({ MULTISIG_CREATION_CODE: "6001" })).toBe("0x6001");
-    expect(resolveCreationCode({ MULTISIG_CREATION_CODE: "nothex" })).toBeUndefined();
-    expect(resolveCreationCode({ MULTISIG_CREATION_CODE: "0x" })).toBeUndefined();
   });
 
-  it("returns undefined when nothing is configured and the constant is empty", () => {
-    // The committed constant is empty until the solcore pipeline populates it,
-    // so with no override the deploy flow is disabled (UI falls back to track).
-    expect(resolveCreationCode({})).toBeUndefined();
+  it("falls back to the hardcoded constant when the override is junk or empty", () => {
+    // The constant is now populated (generated from the solcore artifact), so an
+    // unusable override falls through to it rather than disabling deploy.
+    const constant = resolveCreationCode({});
+    expect(constant).toBe(MULTISIG_CREATION_CODE);
+    expect(resolveCreationCode({ MULTISIG_CREATION_CODE: "nothex" })).toBe(constant);
+    expect(resolveCreationCode({ MULTISIG_CREATION_CODE: "0x" })).toBe(constant);
   });
 });

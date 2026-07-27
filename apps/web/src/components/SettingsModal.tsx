@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { getAddress, isAddress } from "viem";
-import type { Wallet } from "../lib/api.js";
+import type { WalletState } from "../lib/multisig.js";
 import { useQueueOperation, type QueueInput } from "../lib/useOperationActions.js";
 import { Address } from "./data.js";
 import { Button } from "./Button.js";
@@ -19,7 +19,7 @@ export function SettingsModal({
   onClose,
   onDone,
 }: {
-  wallet: Wallet;
+  wallet: WalletState;
   open: boolean;
   onClose: () => void;
   onDone: () => void;
@@ -103,16 +103,16 @@ export function SettingsModal({
           <div className="flex flex-col gap-px border border-line bg-line">
             {wallet.signers.map((s) => (
               <button
-                key={s.id}
+                key={s}
                 type="button"
-                onClick={() => setRemoveAddr(s.address)}
+                onClick={() => setRemoveAddr(s)}
                 className={[
                   "flex items-center justify-between bg-paper px-3.5 py-2.5 text-left transition-colors hover:bg-panel",
-                  removeAddr === s.address ? "outline outline-1 outline-ink" : "",
+                  removeAddr === s ? "outline outline-1 outline-ink" : "",
                 ].join(" ")}
               >
-                <Address value={s.address} />
-                {removeAddr === s.address && <span className="font-mono text-[11px] text-signal">selected</span>}
+                <Address value={s} />
+                {removeAddr === s && <span className="font-mono text-[11px] text-signal">selected</span>}
               </button>
             ))}
           </div>

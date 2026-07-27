@@ -10,7 +10,8 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { getAddress, type Address, type Hex } from "viem";
 import { useAccount, usePublicClient, useSendTransaction } from "wagmi";
-import { api, type Operation, type RecordQueueBody, type Wallet } from "./api.js";
+import type { OperationView, WalletState } from "./multisig.js";
+import { getPreimage, savePreimage } from "./registry.js";
 
 /** Discriminated input for queueing a new operation from a form. */
 export type QueueInput =
@@ -20,69 +21,64 @@ export type QueueInput =
   | { kind: "RemoveSigner"; signer: Address }
   | { kind: "ChangeSigRequired"; count: bigint };
 
-/** Turn a form input into the core Operation + the API write-through record. */
-function buildQueue(input: QueueInput): { op: CoreOperation; record: Omit<RecordQueueBody, "txHash" | "proposer"> } {
+/** Turn a form input into the core Operation (and, for UnstoredCall, its preimage). */
+function buildQueue(input: QueueInput): {
+  op: CoreOperation;
+  preimage?: { hash: Hex; target: Address; value: bigint; payload: Hex };
+} {
   switch (input.kind) {
     case "TransferEth":
-      return {
-        op: { tag: "TransferEth", target: input.target, amount: input.amount },
-        record: { kind: "TransferEth", decoded: { target: input.target, amount: input.amount.toString() } },
-      };
+      return { op: { tag: "TransferEth", target: input.target, amount: input.amount } };
     case "UnstoredCall": {
       const hash = unstoredCallHash(input.target, input.value, input.payload);
       return {
         op: { tag: "UnstoredCall", hash },
-        record: {
-          kind: "UnstoredCall",
-          decoded: { hash, target: input.target, value: input.value.toString(), payload: input.payload },
-          preimage: { hash, target: input.target, value: input.value.toString(), payload: input.payload },
-        },
+        preimage: { hash, target: input.target, value: input.value, payload: input.payload },
       };
     }
     case "AddSigner":
-      return {
-        op: { tag: "AddSigner", signer: input.signer },
-        record: { kind: "AddSigner", decoded: { signer: input.signer } },
-      };
+      return { op: { tag: "AddSigner", signer: input.signer } };
     case "RemoveSigner":
-      return {
-        op: { tag: "RemoveSigner", signer: input.signer },
-        record: { kind: "RemoveSigner", decoded: { signer: input.signer } },
-      };
+      return { op: { tag: "RemoveSigner", signer: input.signer } };
     case "ChangeSigRequired":
-      return {
-        op: { tag: "ChangeSigRequired", count: input.count },
-        record: { kind: "ChangeSigRequired", decoded: { count: input.count.toString() } },
-      };
+      return { op: { tag: "ChangeSigRequired", count: input.count } };
   }
 }
 
-/** Queue an operation: send queue() on-chain, then write it through to the index. */
-export function useQueueOperation(wallet: Wallet, onDone: () => void) {
+/**
+ * Queue an operation: send `queue()` on-chain. For an `UnstoredCall` we also
+ * persist the preimage locally, since only its hash lands on chain and the
+ * preimage is required to execute the op later.
+ */
+export function useQueueOperation(wallet: WalletState, onDone: () => void) {
   const { address: account } = useAccount();
   const { sendTransactionAsync } = useSendTransaction();
-  const publicClient = usePublicClient();
+  const publicClient = usePublicClient({ chainId: wallet.chainId });
 
   return useMutation({
     mutationFn: async (input: QueueInput) => {
       if (!account) throw new Error("connect a signer wallet");
-      const { op, record } = buildQueue(input);
-      const hash = await sendTransactionAsync({
-        to: getAddress(wallet.address),
-        data: encodeQueue(op),
-      });
+      const { op, preimage } = buildQueue(input);
+      if (preimage) {
+        savePreimage(preimage.hash, {
+          target: preimage.target,
+          value: preimage.value.toString(),
+          payload: preimage.payload,
+        });
+      }
+      const hash = await sendTransactionAsync({ to: getAddress(wallet.address), data: encodeQueue(op) });
       if (publicClient) await publicClient.waitForTransactionReceipt({ hash });
-      return api.recordQueue(wallet.chainId, wallet.address, { ...record, txHash: hash, proposer: account });
+      return hash;
     },
     onSuccess: onDone,
   });
 }
 
 /** approve / reject / execute an existing operation (signer/anyone on-chain). */
-export function useOperationActions(wallet: Wallet, onDone: () => void) {
+export function useOperationActions(wallet: WalletState, onDone: () => void) {
   const { address: account } = useAccount();
   const { sendTransactionAsync } = useSendTransaction();
-  const publicClient = usePublicClient();
+  const publicClient = usePublicClient({ chainId: wallet.chainId });
 
   const to = getAddress(wallet.address);
   const send = async (data: Hex) => {
@@ -92,36 +88,33 @@ export function useOperationActions(wallet: Wallet, onDone: () => void) {
   };
 
   const approve = useMutation({
-    mutationFn: async (op: Operation) => {
+    mutationFn: async (op: OperationView) => {
       if (!account) throw new Error("connect a signer wallet");
-      const hash = await send(encodeApprove(BigInt(op.index)));
-      return api.approveOp(op.id, { signer: account, txHash: hash });
+      return send(encodeApprove(BigInt(op.index)));
     },
     onSuccess: onDone,
   });
 
   const reject = useMutation({
-    mutationFn: async (op: Operation) => {
+    mutationFn: async (op: OperationView) => {
       if (!account) throw new Error("connect a signer wallet");
-      const hash = await send(encodeReject(BigInt(op.index)));
-      return api.rejectOp(op.id, { signer: account, txHash: hash });
+      return send(encodeReject(BigInt(op.index)));
     },
     onSuccess: onDone,
   });
 
   const execute = useMutation({
-    mutationFn: async (op: Operation) => {
-      // UnstoredCall needs its preimage supplied as the execute payload.
+    mutationFn: async (op: OperationView) => {
+      // UnstoredCall needs its locally-stored preimage supplied as the payload.
       let payload: Hex = "0x";
-      if (op.kind === "UnstoredCall" && op.decoded.target) {
-        payload = unstoredCallPayload(
-          getAddress(op.decoded.target),
-          BigInt(op.decoded.value ?? "0"),
-          (op.decoded.payload ?? "0x") as Hex,
-        );
+      if (op.op.tag === "UnstoredCall") {
+        const pre = getPreimage(op.op.hash);
+        if (!pre) {
+          throw new Error("missing preimage for this UnstoredCall (queued from another browser?) — cannot execute");
+        }
+        payload = unstoredCallPayload(getAddress(pre.target), BigInt(pre.value), pre.payload);
       }
-      const hash = await send(encodeExecute(BigInt(op.index), payload));
-      return api.executeOp(op.id, { txHash: hash });
+      return send(encodeExecute(BigInt(op.index), payload));
     },
     onSuccess: onDone,
   });

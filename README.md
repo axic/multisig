@@ -1,8 +1,14 @@
 # multisig
 
-A Safe-style multisig app — web + API + database — for the **Solcore** multisig
-contract (`axic/solcore @ multisig-ethglobal-rebase`,
+A Safe-style multisig app for the **Solcore** multisig contract
+(`axic/solcore @ multisig-ethglobal-rebase`,
 `test/examples/dispatch/multisig.solc`).
+
+The contract now exposes getters for all of its state, so **the web app runs
+standalone against an RPC** — it reads signers, threshold, nonce, balance and
+the whole operation queue (statuses + votes) directly from chain. The API +
+database are no longer required to use the app; they remain in the repo as an
+optional index and for the (deferred) relay layer.
 
 > This app targets that specific contract, **not** Safe. The on-chain model is
 > different, and those differences drive the whole design — read
@@ -37,15 +43,16 @@ on-chain.** Consequences:
   `reject(nonce)`), plus a relay layer (`*WithSignature`) taking EIP-2098 /
   approved-hash / EIP-1271 signatures.
 
-### The two things that genuinely live off-chain (why we need a DB)
+### The two things that genuinely live off-chain
 
 1. **`UnstoredCall(bytes32)` preimages.** The chain stores only a hash; the
    preimage `[address target][uint256 value][bytes payload]` must be supplied at
    `execute(nonce, payload)` time and is re-hashed on-chain. Lose it → the op can
-   never execute. Stored in `UnstoredCallPreimage`. **This is the "signed-by-hash
-   only" requirement.**
-2. **Relayed signatures** collected for `*WithSignature` before submission.
-   Stored in `RelaySignature`.
+   never execute. **This is the "signed-by-hash only" requirement.** The web app
+   keeps these in the browser (`localStorage`); the API keeps them in
+   `UnstoredCallPreimage`.
+2. **Relayed signatures** collected for `*WithSignature` before submission
+   (deferred; stored in `RelaySignature`).
 
 ## Contract ABI notes
 
@@ -65,12 +72,24 @@ on-chain.** Consequences:
 
 ## Getting started
 
+The web app is self-contained — all it needs is an RPC:
+
 ```bash
 pnpm install                    # generates the Prisma client (apps/db postinstall)
-cp .env.example .env            # set DATABASE_URL + RPC_URL_11155111
+cp .env.example .env            # set VITE_MULTISIG_CHAIN_IDS + VITE_RPC_URL_<id>
+pnpm --filter @multisig/web dev # web on :5173 — deploy/track, read + drive on-chain
+```
+
+Deployed wallets are remembered in the browser (`localStorage`); everything they
+show is read live from chain via the contract getters (`packages/core`
+`getters.ts`).
+
+The API + database are optional (an index / the deferred relay layer):
+
+```bash
+cp .env.example .env            # also set DATABASE_URL
 pnpm db:push                    # apply schema to Neon (needed for the DB-backed routes)
 pnpm --filter @multisig/api dev # api on :8787  (/health works without a DB)
-pnpm --filter @multisig/web dev # web on :5173
 ```
 
 > The Prisma client is generated automatically on `pnpm install` via the
@@ -88,12 +107,18 @@ proxy pattern — deploy the runtime, then `initialize(owner)` sets the caller a
 signer #0 with threshold 1; more signers and a higher threshold are added via
 queued `AddSigner` / `ChangeSigRequired` operations.
 
-Because the contract exposes **no getters and emits no events yet**, the
-frontend can't read that state back. So the DB is a **write-through index**:
-seeded at deploy, then updated on each successful queue/approve/reject/execute
-the web app performs. The one fact read straight from chain is the balance
-(`/sync`). Two things live only off-chain: `UnstoredCall` preimages and (later)
-relayed signatures.
+The contract exposes **getters** for all of its state (`getSignersCount` /
+`getSigner` / `getSignersRequired` / `getNonce` / `getOperationsCount` /
+`getOperation` / `getStatus` / `getVote` / `isHashApproved` / `isSigner`), so
+the web app reads everything straight from chain — no index required. The
+calldata builders and return decoders (including the non-standard sum-typed
+`Operation` / `OperationStatus` / `Vote` returns) live in `packages/core`
+`getters.ts`; the web read layer is `apps/web/src/lib/multisig.ts`. Only
+`UnstoredCall` preimages (and, later, relayed signatures) live off-chain — the
+web app keeps preimages in `localStorage`.
+
+The API's write-through DB index remains available for server-side consumers,
+but the web app no longer depends on it.
 
 Calldata is built in `packages/core` and sent as raw transactions:
 

@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { getAddress, isAddress } from "viem";
 import { useAccount, useChainId, usePublicClient, useSendTransaction } from "wagmi";
 import { Button, Card, Input, Toast } from "../components/index.js";
-import { api } from "../lib/api.js";
+import { trackWallet } from "../lib/registry.js";
 
 /**
  * Deploy a new `Multisig`, or track an existing one.
@@ -43,30 +43,18 @@ export function CreateWalletPage() {
       // 2. Initialize it — sets the connected account as signer[0], threshold 1.
       const initHash = await sendTransactionAsync({ to: wallet, data: encodeInitialize(account) });
       await publicClient.waitForTransactionReceipt({ hash: initHash });
-      return api.registerWallet({
-        chainId,
-        address: wallet,
-        deployer: account,
-        label: label || undefined,
-        deployTxHash: hash,
-      });
+      // Remember the address locally; all state is read back from chain.
+      return trackWallet({ chainId, address: wallet, label: label || undefined });
     },
     onSuccess: (w) => navigate(`/wallet/${w.chainId}/${w.address}`),
   });
 
   const track = useMutation({
     mutationFn: async () => {
-      if (!account) throw new Error("connect a wallet first");
       if (!isAddress(existing)) throw new Error("enter a valid Multisig address");
-      // We can't read signers back from chain, so seed signer[0] as the
-      // connected account. If you weren't the deployer, fix the set via a
-      // queued AddSigner/RemoveSigner once you can act as a signer.
-      return api.registerWallet({
-        chainId,
-        address: getAddress(existing),
-        deployer: account,
-        label: label || undefined,
-      });
+      // The signer set, threshold, and everything else are read from chain via
+      // the getters, so tracking just remembers the address.
+      return trackWallet({ chainId, address: getAddress(existing), label: label || undefined });
     },
     onSuccess: (w) => navigate(`/wallet/${w.chainId}/${w.address}`),
   });
@@ -120,8 +108,8 @@ export function CreateWalletPage() {
           <div className="flex flex-col gap-4">
             <Input label="Multisig address" placeholder="0x…" value={existing} onChange={(e) => setExisting(e.target.value)} />
             <div className="flex justify-end">
-              <Button variant="secondary" disabled={!isConnected || busy} onClick={() => track.mutate()}>
-                {track.isPending ? "Registering…" : "Track wallet"}
+              <Button variant="secondary" disabled={busy} onClick={() => track.mutate()}>
+                {track.isPending ? "Tracking…" : "Track wallet"}
               </Button>
             </div>
           </div>
