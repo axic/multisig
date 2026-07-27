@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { getAddress, isAddress, isHex, parseEther } from "viem";
-import type { Wallet } from "../lib/api.js";
+import type { WalletState } from "../lib/multisig.js";
 import { useQueueOperation, type QueueInput } from "../lib/useOperationActions.js";
 import { Button } from "./Button.js";
 import { Input } from "./Input.js";
@@ -19,7 +19,7 @@ export function ProposeModal({
   onClose,
   onDone,
 }: {
-  wallet: Wallet;
+  wallet: WalletState;
   open: boolean;
   onClose: () => void;
   onDone: () => void;
@@ -100,7 +100,7 @@ export function ProposeModal({
             value={data}
             onChange={(e) => setData(e.target.value)}
           />
-          <span className="text-xs text-muted">Queued as an UnstoredCall — the preimage is stored off-chain and supplied at execute.</span>
+          <span className="text-xs text-muted">Queued as an UnstoredCall — the preimage is stored in this browser and supplied at execute.</span>
         </label>
       )}
 

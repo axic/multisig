@@ -6,6 +6,7 @@ export * from "./operations.js";
 export * from "./selectors.js";
 export * from "./abi.js";
 export * from "./operationCodec.js";
+export * from "./getters.js";
 export * from "./preimage.js";
 export * from "./hash.js";
 export * from "./deploy.js";

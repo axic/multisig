@@ -1,4 +1,4 @@
-import type { Operation, Wallet } from "../lib/api.js";
+import type { OperationView, WalletState } from "../lib/multisig.js";
 import { operationSummary } from "../lib/operation.js";
 import type { useOperationActions } from "../lib/useOperationActions.js";
 import { Button } from "./Button.js";
@@ -16,15 +16,14 @@ export function OperationRow({
   account,
   actions,
 }: {
-  op: Operation;
-  wallet: Wallet;
+  op: OperationView;
+  wallet: WalletState;
   isNext: boolean;
   account?: string;
   actions: Actions;
 }) {
   const required = wallet.signersRequired;
-  const isSigner = wallet.signers.some((s) => eq(s.address, account));
-  const myVote = op.votes.find((v) => eq(v.signer, account))?.vote;
+  const isSigner = wallet.signers.some((s) => eq(s, account));
   const open = op.status === "Approvals";
   const rejected = op.status === "Rejected";
 
@@ -46,7 +45,7 @@ export function OperationRow({
               <span className="font-mono text-[11px] uppercase tracking-label text-muted">#{op.index}</span>
               <span className="text-sm font-medium">{op.kind}</span>
             </div>
-            <span className="truncate text-[13px] text-body">{operationSummary(op)}</span>
+            <span className="truncate text-[13px] text-body">{operationSummary(op.op)}</span>
           </div>
         </div>
         <div className="flex-none text-right">
@@ -58,9 +57,11 @@ export function OperationRow({
           ) : (
             <StateBadge state={badgeState} align="right" />
           )}
-          <div className="mt-1 font-mono text-[11px] text-muted">
-            {op.approvals} / {required} approvals
-          </div>
+          {open && (
+            <div className="mt-1 font-mono text-[11px] text-muted">
+              {op.approvals} / {required} approvals
+            </div>
+          )}
         </div>
       </div>
 
@@ -68,8 +69,13 @@ export function OperationRow({
         <div className="flex flex-wrap justify-end gap-2">
           {open && (
             <>
-              <Button size="sm" variant="secondary" disabled={!isSigner || myVote === "Approved" || busy} onClick={() => actions.approve.mutate(op)}>
-                {myVote === "Approved" ? "Approved" : actions.approve.isPending ? "Signing…" : "Approve"}
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={!isSigner || op.myVote === "Approved" || busy}
+                onClick={() => actions.approve.mutate(op)}
+              >
+                {op.myVote === "Approved" ? "Approved" : actions.approve.isPending ? "Signing…" : "Approve"}
               </Button>
               <Button size="sm" variant="tertiary" disabled={!isSigner || busy} onClick={() => actions.reject.mutate(op)}>
                 Reject
@@ -94,10 +100,6 @@ export function OperationRow({
             {actions.execute.isPending ? "Executing…" : rejected ? "Skip" : "Execute"}
           </Button>
         </div>
-      )}
-
-      {op.executedTxHash && (
-        <div className="text-right font-mono text-[11px] text-muted">tx {op.executedTxHash.slice(0, 10)}…</div>
       )}
     </div>
   );

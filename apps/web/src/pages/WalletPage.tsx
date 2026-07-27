@@ -1,7 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { useAccount } from "wagmi";
+import { getAddress } from "viem";
+import { useAccount, usePublicClient } from "wagmi";
 import {
   Address,
   Amount,
@@ -13,36 +14,48 @@ import {
   QuorumMark,
   SettingsModal,
 } from "../components/index.js";
-import { api, type Wallet } from "../lib/api.js";
 import { formatWei } from "../lib/format.js";
+import { readOperations, readWalletState, type WalletState } from "../lib/multisig.js";
+import { getTrackedWallet } from "../lib/registry.js";
 import { useOperationActions } from "../lib/useOperationActions.js";
 
 export function WalletPage() {
   const { chainId: chainIdParam, address } = useParams();
   const chainId = Number(chainIdParam);
+  const publicClient = usePublicClient({ chainId });
 
   const walletQ = useQuery({
     queryKey: ["wallet", chainId, address],
-    queryFn: () => api.getWallet(chainId, address!),
-    enabled: Boolean(chainId && address),
+    queryFn: () => {
+      if (!publicClient) throw new Error("no RPC client for this chain");
+      const label = getTrackedWallet(chainId, address!)?.label;
+      return readWalletState(publicClient, chainId, address!, label);
+    },
+    enabled: Boolean(chainId && address && publicClient),
   });
 
   if (walletQ.isLoading) return <p className="font-mono text-sm text-muted">Loading…</p>;
-  if (walletQ.error || !walletQ.data) return <p className="text-sm text-signal">Not found.</p>;
+  if (walletQ.error || !walletQ.data)
+    return <p className="text-sm text-signal">{(walletQ.error as Error)?.message ?? "Not found."}</p>;
 
-  return <WalletView key={walletQ.data.id} wallet={walletQ.data} />;
+  return <WalletView key={walletQ.data.address} wallet={walletQ.data} />;
 }
 
-function WalletView({ wallet }: { wallet: Wallet }) {
+function WalletView({ wallet }: { wallet: WalletState }) {
   const { chainId, address } = wallet;
   const qc = useQueryClient();
+  const publicClient = usePublicClient({ chainId });
   const { address: account } = useAccount();
   const [proposeOpen, setProposeOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const opsQ = useQuery({
-    queryKey: ["operations", chainId, address],
-    queryFn: () => api.listOperations(chainId, address),
+    queryKey: ["operations", chainId, address, wallet.operationsCount, account],
+    queryFn: () => {
+      if (!publicClient) throw new Error("no RPC client for this chain");
+      return readOperations(publicClient, address, wallet.operationsCount, account ? getAddress(account) : undefined);
+    },
+    enabled: Boolean(publicClient),
   });
 
   const refresh = () => {
@@ -50,10 +63,9 @@ function WalletView({ wallet }: { wallet: Wallet }) {
     qc.invalidateQueries({ queryKey: ["operations", chainId, address] });
   };
 
-  const sync = useMutation({ mutationFn: () => api.syncWallet(chainId, address), onSuccess: refresh });
   const actions = useOperationActions(wallet, refresh);
 
-  const operations = opsQ.data?.operations ?? [];
+  const operations = opsQ.data ?? [];
   const active = operations.filter((o) => o.status !== "Executed");
   const history = operations.filter((o) => o.status === "Executed");
 
@@ -68,8 +80,8 @@ function WalletView({ wallet }: { wallet: Wallet }) {
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="tertiary" size="sm" onClick={() => sync.mutate()} disabled={sync.isPending}>
-            {sync.isPending ? "Syncing…" : "Sync"}
+          <Button variant="tertiary" size="sm" onClick={refresh} disabled={opsQ.isFetching}>
+            {opsQ.isFetching ? "Refreshing…" : "Refresh"}
           </Button>
           <Button size="sm" onClick={() => setProposeOpen(true)}>
             Queue transaction
@@ -111,10 +123,10 @@ function WalletView({ wallet }: { wallet: Wallet }) {
 
       <Card title="Signers" flush>
         <div className="flex flex-col gap-px bg-line">
-          {wallet.signers.map((s) => (
-            <div key={s.id} className="flex items-center justify-between bg-paper px-6 py-3.5">
-              <Address value={s.address} />
-              <span className="font-mono text-[11px] uppercase tracking-label text-muted">#{s.index}</span>
+          {wallet.signers.map((s, i) => (
+            <div key={s} className="flex items-center justify-between bg-paper px-6 py-3.5">
+              <Address value={s} />
+              <span className="font-mono text-[11px] uppercase tracking-label text-muted">#{i}</span>
             </div>
           ))}
           {wallet.signers.length === 0 && <div className="bg-paper px-6 py-4 text-sm text-muted">No signers.</div>}
@@ -128,7 +140,7 @@ function WalletView({ wallet }: { wallet: Wallet }) {
         ) : (
           <div className="flex flex-col gap-px border border-line bg-line">
             {active.map((o) => (
-              <OperationRow key={o.id} op={o} wallet={wallet} isNext={o.index === wallet.nonce} account={account} actions={actions} />
+              <OperationRow key={o.index} op={o} wallet={wallet} isNext={o.index === wallet.nonce} account={account} actions={actions} />
             ))}
           </div>
         )}
@@ -139,7 +151,7 @@ function WalletView({ wallet }: { wallet: Wallet }) {
           <h2 className="font-mono text-[11px] uppercase tracking-label text-muted">History</h2>
           <div className="flex flex-col gap-px border border-line bg-line">
             {history.map((o) => (
-              <OperationRow key={o.id} op={o} wallet={wallet} isNext={false} account={account} actions={actions} />
+              <OperationRow key={o.index} op={o} wallet={wallet} isNext={false} account={account} actions={actions} />
             ))}
           </div>
         </div>
