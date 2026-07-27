@@ -3,8 +3,8 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAddress, isAddress } from "viem";
-import { useAccount, useChainId, usePublicClient, useSendTransaction } from "wagmi";
-import { Button, Card, Input, Toast } from "../components/index.js";
+import { useAccount, useChainId, useChains, usePublicClient, useSendTransaction, useSwitchChain } from "wagmi";
+import { Button, Card, Input, Label, Toast } from "../components/index.js";
 import { trackWallet } from "../lib/registry.js";
 
 /**
@@ -17,12 +17,22 @@ import { trackWallet } from "../lib/registry.js";
  * higher threshold are then added via queued AddSigner / ChangeSigRequired
  * operations. When no creation code is configured, deploy is disabled and you
  * can still track an existing address.
+ *
+ * The target chain is chosen explicitly here rather than inferred from the
+ * connection: tracking is a read-only, wallet-optional action, and `useChainId`
+ * silently falls back to the first configured chain when disconnected — which
+ * would file wallets under the wrong network.
  */
 export function CreateWalletPage() {
   const navigate = useNavigate();
-  const { address: account, isConnected } = useAccount();
-  const chainId = useChainId();
-  const publicClient = usePublicClient();
+  const { address: account, isConnected, chain: activeChain } = useAccount();
+  const chains = useChains();
+  const currentChainId = useChainId();
+  const { switchChainAsync } = useSwitchChain();
+
+  // Explicit chain choice, defaulted to whatever wagmi currently reports.
+  const [chainId, setChainId] = useState<number>(currentChainId);
+  const publicClient = usePublicClient({ chainId });
   const { sendTransactionAsync } = useSendTransaction();
 
   const creationCode = resolveCreationCode(import.meta.env as Record<string, string | undefined>);
@@ -34,15 +44,19 @@ export function CreateWalletPage() {
     mutationFn: async () => {
       if (!account) throw new Error("connect a wallet first");
       if (!creationCode) throw new Error("no creation code configured (VITE_MULTISIG_CREATION_CODE)");
-      if (!publicClient) throw new Error("no RPC client");
+      // The tx lands on whatever chain the wallet is on, so make sure that
+      // matches the chosen chain before deploying (keeps the recorded chain honest).
+      if (activeChain?.id !== chainId) await switchChainAsync({ chainId });
+      const client = publicClient;
+      if (!client) throw new Error("no RPC client for the selected chain");
       // 1. Deploy the Multisig runtime.
       const hash = await sendTransactionAsync({ data: creationCode });
-      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      const receipt = await client.waitForTransactionReceipt({ hash });
       if (!receipt.contractAddress) throw new Error("deploy tx produced no contract address");
       const wallet = getAddress(receipt.contractAddress);
       // 2. Initialize it — sets the connected account as signer[0], threshold 1.
       const initHash = await sendTransactionAsync({ to: wallet, data: encodeInitialize(account) });
-      await publicClient.waitForTransactionReceipt({ hash: initHash });
+      await client.waitForTransactionReceipt({ hash: initHash });
       // Remember the address locally; all state is read back from chain.
       return trackWallet({ chainId, address: wallet, label: label || undefined });
     },
@@ -53,7 +67,7 @@ export function CreateWalletPage() {
     mutationFn: async () => {
       if (!isAddress(existing)) throw new Error("enter a valid Multisig address");
       // The signer set, threshold, and everything else are read from chain via
-      // the getters, so tracking just remembers the address.
+      // the getters, so tracking just remembers the address on the chosen chain.
       return trackWallet({ chainId, address: getAddress(existing), label: label || undefined });
     },
     onSuccess: (w) => navigate(`/wallet/${w.chainId}/${w.address}`),
@@ -68,12 +82,26 @@ export function CreateWalletPage() {
 
       {!isConnected && (
         <div className="mb-5">
-          <Toast state="unsigned" title="Connect a wallet" detail="You need an account to deploy or track a multisig." />
+          <Toast state="unsigned" title="Connect a wallet" detail="You need an account to deploy. Tracking an existing wallet works without one." />
         </div>
       )}
 
       <Card title="Wallet">
         <div className="flex flex-col gap-5">
+          <label className="flex flex-col gap-2">
+            <Label>Chain</Label>
+            <select
+              value={chainId}
+              onChange={(e) => setChainId(Number(e.target.value))}
+              className="w-full min-w-0 border border-line bg-white px-3.5 py-3 font-mono text-[13px] text-ink outline-none focus:border-ink"
+            >
+              {chains.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} · {c.id}
+                </option>
+              ))}
+            </select>
+          </label>
           <Input label="Label" placeholder="Treasury" className="font-sans" value={label} onChange={(e) => setLabel(e.target.value)} />
           <p className="text-sm leading-relaxed text-body">
             On deploy you become signer #0 with a threshold of 1. Add signers and raise the threshold
