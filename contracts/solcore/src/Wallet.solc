@@ -37,7 +37,7 @@
 
 import std.{*};
 import std.dispatch.{*};
-import std.opcodes.{address as address_, calldatasize, mload, caller as caller_, chainid};
+import std.opcodes.{address as address_, calldatasize, mload, caller as caller_, chainid, mstore};
 import std.eip712.{eip712Digest, eip712DomainSeparator};
 import std.ABIGeneric.{*};
 import std.StorageGeneric.{*};
@@ -84,6 +84,15 @@ data BatchOperation =
     | Reject(uint256, Signature)
     | Execute(uint256, memory(bytes));
 
+instance bytes4:ABIEncode {
+    // bytes4's word rep is right-aligned (e.g. `bytes4(shr(224, h))`),
+    // so it is written directly into the head like bytes32
+    function encodeInto(x:bytes4, basePtr:word, offset:word, tail:word) -> word {
+        let repx : word = Typedef.rep(x);
+        mstore(basePtr + offset, repx);
+        return tail;
+    }
+}
 
 instance Vote:Eq {
   function eq(a: Vote, b: Vote) -> bool {
