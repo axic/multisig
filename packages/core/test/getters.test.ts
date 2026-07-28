@@ -1,4 +1,4 @@
-import { concatHex, getAddress, keccak256, padHex, toBytes, toHex, type Hex } from "viem";
+import { concatHex, encodeAbiParameters, getAddress, keccak256, padHex, toBytes, toHex, type Hex } from "viem";
 import { describe, expect, it } from "vitest";
 import {
   decodeAddress,
@@ -12,9 +12,12 @@ import {
   encodeGetVote,
   encodeIsSigner,
 } from "../src/getters.js";
-import { encodeOperation } from "../src/operationCodec.js";
+import { operationPreimage } from "../src/hash.js";
 import type { Operation } from "../src/operations.js";
 import { GETTER_SELECTORS } from "../src/selectors.js";
+
+/** Wrap a flat operation preimage as the ABI `bytes` value `getOperation` returns. */
+const asBytesReturn = (preimage: Hex): Hex => encodeAbiParameters([{ type: "bytes" }], [preimage]);
 
 const w = (h: Hex) => padHex(h, { size: 32 });
 const standardSelector = (sig: string): Hex => keccak256(toBytes(sig)).slice(0, 10) as Hex;
@@ -76,8 +79,11 @@ describe("scalar return decoders", () => {
 });
 
 describe("Operation return decoder", () => {
-  // The return layout is byte-identical to the queue(Operation) argument.
-  it("round-trips every static variant against encodeOperation", () => {
+  // `getOperation(i)` returns the flat `[tag][fields...]` operation encoding as
+  // an ABI `bytes` value — the same bytes `operationPreimage` produces (the
+  // contract can't return the dynamic `Operation` sum directly). So the decoder
+  // is the inverse of `operationPreimage`, wrapped in a `bytes` return.
+  it("round-trips every variant through the bytes return", () => {
     const cases: Operation[] = [
       { tag: "AddSigner", signer: getAddress("0x00000000000000000000000000000000cafe0001") },
       { tag: "RemoveSigner", signer: getAddress("0x00000000000000000000000000000000cafe0002") },
@@ -89,12 +95,13 @@ describe("Operation return decoder", () => {
         token: getAddress("0x00000000000000000000000000000000cafe0005"),
         amount: 42n,
       },
+      { tag: "Call", target: getAddress("0x00000000000000000000000000000000cafe0006"), value: 7n, payload: "0xdeadbeef" },
       { tag: "UnstoredCall", hash: `0x${"ab".repeat(32)}` },
       { tag: "ApproveSignedHash", hash: `0x${"cd".repeat(32)}` },
       { tag: "RevokeSignedHash", hash: `0x${"ef".repeat(32)}` },
     ];
     for (const op of cases) {
-      expect(decodeOperationReturn(encodeOperation(op))).toEqual(op);
+      expect(decodeOperationReturn(asBytesReturn(operationPreimage(op)))).toEqual(op);
     }
   });
 });

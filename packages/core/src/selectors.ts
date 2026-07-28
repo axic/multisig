@@ -49,7 +49,7 @@ export const GETTER_SELECTORS = {
   getNonce: "0xd087d288",
   /** getOperationsCount() -> uint256 */
   getOperationsCount: "0xdd1033f8",
-  /** getOperation(uint256 i) -> Operation (non-standard sum encoding) */
+  /** getOperation(uint256 i) -> bytes (flat `[tag][fields...]` operation encoding) */
   getOperation: "0x202e3924",
   /** getStatus(uint256 i) -> OperationStatus (non-standard sum encoding) */
   getStatus: "0x5c622a0e",

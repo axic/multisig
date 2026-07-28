@@ -2,13 +2,16 @@ import {
   concatHex,
   encodeAbiParameters,
   getAddress,
+  hexToBigInt,
   keccak256,
   padHex,
+  size,
+  slice,
   toHex,
   type Address,
   type Hex,
 } from "viem";
-import { OPERATION_KIND_TAGS, type Operation, type OperationKind } from "./operations.js";
+import { OPERATION_KIND_TAGS, OPERATION_TAGS, type Operation, type OperationKind } from "./operations.js";
 
 /**
  * Operation signing-hash — the EIP-712 digest a relayed `Signature` must sign,
@@ -62,6 +65,49 @@ export function operationPreimage(operation: Operation): Hex {
       return concatHex([tag(7), operation.hash]);
     case "RevokeSignedHash":
       return concatHex([tag(8), operation.hash]);
+  }
+}
+
+/**
+ * Inverse of {@link operationPreimage}: decode the flat `[tag word][field
+ * words...]` byte string back into an `Operation`.
+ *
+ * This is the exact wire format the on-chain `getOperation(i)` getter returns
+ * (as a `bytes`) — the contract builds it with the very same match that
+ * `create_signature_hash` hashes. The tag is the plain variant index 0..8 (NOT
+ * the nested binary-sum tags that `queue()` calldata uses — see
+ * ./operationCodec.ts), each scalar field is a 32-byte word, and `Call`'s
+ * dynamic payload is the verbatim trailing bytes.
+ */
+export function decodeOperationPreimage(payload: Hex): Operation {
+  if (size(payload) < 32) throw new Error(`operation preimage too short: ${size(payload)} bytes`);
+  const wordAt = (i: number): Hex => slice(payload, i * 32, (i + 1) * 32);
+  const uint = (i: number): bigint => hexToBigInt(wordAt(i));
+  const addr = (i: number): Address => getAddress(slice(wordAt(i), 12, 32));
+  const tag = Number(uint(0));
+  const name = OPERATION_TAGS[tag];
+  switch (name) {
+    case "AddSigner":
+      return { tag: name, signer: addr(1) };
+    case "RemoveSigner":
+      return { tag: name, signer: addr(1) };
+    case "ChangeSigRequired":
+      return { tag: name, count: uint(1) };
+    case "TransferEth":
+      return { tag: name, target: addr(1), amount: uint(2) };
+    case "TransferToken":
+      return { tag: name, target: addr(1), token: addr(2), amount: uint(3) };
+    case "Call":
+      // Everything after [tag][target][value] is the verbatim call payload.
+      return { tag: name, target: addr(1), value: uint(2), payload: size(payload) > 96 ? slice(payload, 96) : "0x" };
+    case "UnstoredCall":
+      return { tag: name, hash: wordAt(1) };
+    case "ApproveSignedHash":
+      return { tag: name, hash: wordAt(1) };
+    case "RevokeSignedHash":
+      return { tag: name, hash: wordAt(1) };
+    default:
+      throw new Error(`decodeOperationPreimage: unknown operation tag ${tag}`);
   }
 }
 

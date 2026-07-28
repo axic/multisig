@@ -1,16 +1,15 @@
 import {
   concatHex,
+  decodeAbiParameters,
   encodeAbiParameters,
   getAddress,
   hexToBigInt,
-  padHex,
-  size,
   slice,
   type Address,
   type Hex,
 } from "viem";
 import { GETTER_SELECTORS } from "./selectors.js";
-import { decodeOperation, OPERATION_WORDS } from "./operationCodec.js";
+import { decodeOperationPreimage } from "./hash.js";
 import type { Operation, OperationStatus, Vote } from "./operations.js";
 
 /**
@@ -21,12 +20,18 @@ import type { Operation, OperationStatus, Vote } from "./operations.js";
  * votes — straight from chain, with no off-chain index. Each getter is a plain
  * `staticcall`: build the calldata here, `eth_call` it, and decode the return.
  *
- * The scalar getters (uint256/address/bool) use standard ABI. The three that
- * return a Solcore sum (`Operation`, `OperationStatus`, `Vote`) come back in the
- * same right-nested binary-sum layout Solcore uses everywhere (tag word 0 = inl,
- * 1 = inr; fields inline; see ./operationCodec.ts and std/ABIGeneric.solc), with
- * NO leading offset word — `abi_encode` writes the head from byte 0. We decode
- * that layout by hand below.
+ * The scalar getters (uint256/address/bool) use standard ABI. `OperationStatus`
+ * and `Vote` are *static* Solcore sums, returned inline in the right-nested
+ * binary-sum layout (tag word 0 = inl, 1 = inr; fields inline; see
+ * ./operationCodec.ts and std/ABIGeneric.solc), with NO leading offset word. We
+ * decode those by hand below.
+ *
+ * `Operation` is different: it is a *dynamic* sum (its `Call` variant carries a
+ * dynamic `bytes`), and Solcore can't yet ABI-encode a dynamic sum as a return
+ * value — it emits only the head tag word, so the whole operation would come
+ * back as a single `0x00…0`. So `getOperation(i)` returns the operation as a
+ * plain `bytes`: the flat `[tag][fields...]` encoding (the same bytes
+ * `create_signature_hash` hashes), which we decode via `decodeOperationReturn`.
  */
 
 const WORD = 32;
@@ -51,7 +56,7 @@ const withUint = (selector: Hex, i: bigint): Hex =>
 /** getSigner(uint256 i) -> address */
 export const encodeGetSigner = (i: bigint): Hex => withUint(GETTER_SELECTORS.getSigner, i);
 
-/** getOperation(uint256 i) -> Operation */
+/** getOperation(uint256 i) -> bytes (flat `[tag][fields...]` operation encoding) */
 export const encodeGetOperation = (i: bigint): Hex => withUint(GETTER_SELECTORS.getOperation, i);
 
 /** getStatus(uint256 i) -> OperationStatus */
@@ -89,16 +94,19 @@ export const decodeBool = (data: Hex): boolean => wordUint(data, 0) !== 0n;
 /**
  * Decode an `Operation` return.
  *
- * The layout is identical to the `queue(Operation)` argument — the same generic
- * sum encoding produces both — so we reuse the golden-vector-validated
- * {@link decodeOperation}. That decoder wants the full fixed head width; the
- * getter always returns exactly that (`headSize` == OPERATION_WORDS words), but
- * we defensively right-pad in case a build returns a tighter head.
+ * `getOperation(i)` returns the operation as a plain ABI `bytes` value (head =
+ * a 32-byte offset, then `[length][data]` in the tail). We can't return the
+ * `Operation` sum directly: it is a *dynamic* sum (the `Call` variant carries a
+ * dynamic `bytes`), and Solcore's generic ABI encoder can't yet return a
+ * dynamic sum as a value — it emits only the head word, collapsing the whole
+ * operation to a single `0x00…0`. So the getter hands back the flat
+ * `[tag][fields...]` byte encoding instead (the same bytes
+ * `create_signature_hash` builds; see {@link decodeOperationPreimage}), which
+ * rides the well-exercised `bytes` return path.
  */
 export function decodeOperationReturn(data: Hex): Operation {
-  const words = Math.floor(size(data) / WORD);
-  const padded = words < OPERATION_WORDS ? padHex(data, { dir: "right", size: OPERATION_WORDS * WORD }) : data;
-  return decodeOperation(padded);
+  const [payload] = decodeAbiParameters([{ type: "bytes" }], data);
+  return decodeOperationPreimage(payload);
 }
 
 /**

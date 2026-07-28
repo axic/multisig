@@ -140,8 +140,11 @@ contract Multisig {
     public function getOperationsCount() -> uint256 {
         return operations_count;
     }
-    public function getOperation(i: uint256) -> Operation {
-        return operations[i];
+    // Returns the operation as its flat `[tag][fields...]` byte encoding rather
+    // than the `Operation` sum: Operation is a dynamic sum and can't be ABI-encoded
+    // as a return value yet (see encode_operation / create_signature_hash).
+    public function getOperation(i: uint256) -> memory(bytes) {
+        return encode_operation(operations[i]);
     }
     public function getStatus(i: uint256) -> OperationStatus {
         return status[i];
@@ -253,6 +256,38 @@ contract Multisig {
         // a dynamic field in -- so abi_encode(operation) cannot be encoded
         // correctly yet. The dynamic-sum ABIDecode already exists; the symmetric
         // encode is the missing half.
+        let op_bytes: memory(bytes) = encode_operation(operation);
+
+        // hashStruct(message) = keccak256(typeHash || kind || keccak256(operation))
+        let typeHash = keccakLit("MultisigOperation(uint256 kind,bytes operation)");
+        let structHash = keccak256_(
+            concat(concat(bytes32(typeHash), operation_kind_tag(kind)), keccak256_(op_bytes))
+        );
+
+        // Domain: EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)
+        let domainSeparator = eip712DomainSeparator(
+            bytes32(keccakLit("Multisig")),
+            bytes32(keccakLit("1")),
+            uint256(chainid()),
+            address(address_())
+        );
+
+        return eip712Digest(domainSeparator, structHash);
+    }
+
+    // Flat, deterministic byte encoding of an Operation:
+    //   [constructor tag][operation fields...]
+    // one 32-byte word per scalar field, with a dynamic bytes payload appended
+    // verbatim (the `Call` variant). This is what `create_signature_hash` binds
+    // via keccak256, and what `getOperation` hands back to off-chain readers.
+    //
+    // NOTE: we return this hand-rolled encoding instead of the `Operation` sum
+    // itself because Operation is a *dynamic* sum (its Call branch carries a
+    // dynamic bytes), and std.ABIGeneric's sum:ABIEncode is static-sums-only --
+    // returning the sum directly emits just the head tag word, collapsing the
+    // whole operation to a single 0x00..0 (see the TODO in create_signature_hash).
+    // A plain `bytes` return rides the well-exercised dynamic-bytes encode path.
+    function encode_operation(operation: Operation) -> memory(bytes) {
         let op_bytes: memory(bytes);
         match operation {
             | Operation.AddSigner(signer) =>
@@ -274,22 +309,7 @@ contract Multisig {
             | Operation.RevokeSignedHash(hash) =>
                 op_bytes = concat(bytes32(8), hash);
         }
-
-        // hashStruct(message) = keccak256(typeHash || kind || keccak256(operation))
-        let typeHash = keccakLit("MultisigOperation(uint256 kind,bytes operation)");
-        let structHash = keccak256_(
-            concat(concat(bytes32(typeHash), operation_kind_tag(kind)), keccak256_(op_bytes))
-        );
-
-        // Domain: EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)
-        let domainSeparator = eip712DomainSeparator(
-            bytes32(keccakLit("Multisig")),
-            bytes32(keccakLit("1")),
-            uint256(chainid()),
-            address(address_())
-        );
-
-        return eip712Digest(domainSeparator, structHash);
+        return op_bytes;
     }
 
     function operation_kind_tag(kind: OperationKind) -> bytes32 {
