@@ -1,6 +1,7 @@
 import { getAddress, keccak256, toHex, type Address } from "viem";
 import { describe, expect, it } from "vitest";
 import {
+  decodeOperationPreimage,
   domainSeparator,
   operationPreimage,
   operationSigningHash,
@@ -45,6 +46,40 @@ describe("create_signature_hash (EIP-712) — mirrors the contract", () => {
     // Sanity: struct hash and domain separator are independent 32-byte values.
     expect(operationStructHash("Queue", op)).toMatch(/^0x[0-9a-f]{64}$/);
     expect(domainSeparator(CTX)).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+});
+
+describe("decodeOperationPreimage — inverse of operationPreimage", () => {
+  it("round-trips every variant", () => {
+    const cases: Operation[] = [
+      { tag: "AddSigner", signer: getAddress("0x00000000000000000000000000000000cafe0001") as Address },
+      { tag: "RemoveSigner", signer: getAddress("0x00000000000000000000000000000000cafe0002") as Address },
+      { tag: "ChangeSigRequired", count: 3n },
+      { tag: "TransferEth", target: getAddress("0x00000000000000000000000000000000cafe0003") as Address, amount: 10n ** 18n },
+      {
+        tag: "TransferToken",
+        target: getAddress("0x00000000000000000000000000000000cafe0004") as Address,
+        token: getAddress("0x00000000000000000000000000000000cafe0005") as Address,
+        amount: 42n,
+      },
+      { tag: "Call", target: getAddress("0x00000000000000000000000000000000cafe0006") as Address, value: 7n, payload: "0xdeadbeef" },
+      { tag: "UnstoredCall", hash: `0x${"ab".repeat(32)}` },
+      { tag: "ApproveSignedHash", hash: `0x${"cd".repeat(32)}` },
+      { tag: "RevokeSignedHash", hash: `0x${"ef".repeat(32)}` },
+    ];
+    for (const op of cases) {
+      expect(decodeOperationPreimage(operationPreimage(op))).toEqual(op);
+    }
+  });
+
+  it("decodes a Call with an empty payload", () => {
+    const op: Operation = {
+      tag: "Call",
+      target: getAddress("0x00000000000000000000000000000000cafe0006") as Address,
+      value: 0n,
+      payload: "0x",
+    };
+    expect(decodeOperationPreimage(operationPreimage(op))).toEqual(op);
   });
 });
 
