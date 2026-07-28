@@ -4,7 +4,7 @@
   inputs = {
     # solcore provides the `sol-core` and `yule` binaries (one package, two
     # executables) and, via its source tree, the std library.
-    solcore.url = "github:axic/solcore/ethglobal";
+    solcore.url = "github:axic/solcore";
 
     # Reuse solcore's pinned nixpkgs + foundry overlay so the toolchains match.
     nixpkgs.follows = "solcore/nixpkgs";
