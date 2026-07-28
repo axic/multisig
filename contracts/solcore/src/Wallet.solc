@@ -159,8 +159,8 @@ contract Multisig {
     // The "constructor" for the factory.
     public function initialize(owner: address) -> () {
         // This is the appendDelegatecallCheck in Solidity. There is no language support for this yet.
-        // require(deployTimeAddress() == address(),, Error(0x12345678)); // MustBeInitializedViaProxy()
-        require(signers_count == 0, Error(0x12345678)); // AlreadyInitialized()
+        // require(deployTimeAddress() == address(),, Error(0xf92d31f2)); // MustBeInitializedViaProxy()
+        require(signers_count == 0, Error(0x0dc149f0)); // AlreadyInitialized()
         signers[uint256(0)] = owner;
         signers_count = 1;
         signers_required = 1;
@@ -168,7 +168,7 @@ contract Multisig {
 
     // Only signers can call this.
     public function queue(op: Operation) -> () {
-        require(isSigner(caller()), Error(0x12345678)); // NotASigner()
+        require(isSigner(caller()), Error(0xda0357f7)); // NotASigner()
         perform_queue(op);
     }
 
@@ -176,10 +176,10 @@ contract Multisig {
         // Some basic sanity checks.
         match op {
             | Operation.AddSigner(signer) =>
-                require(signer != address(0), Error(0x12345678)); // CannotAddZeroAddressAsSigner()
-                require(signer != address(address_()), Error(0x12345678)); // CannotAddSelfAsSigner()
+                require(signer != address(0), Error(0x0e8fceb7)); // CannotAddZeroAddressAsSigner()
+                require(signer != address(address_()), Error(0x82788a84)); // CannotAddSelfAsSigner()
             | Operation.ChangeSigRequired(count) =>
-                require(count >= 1, Error(0x12345678)); // ThresholdBelowMinimum()
+                require(count >= 1, Error(0x1779ab44)); // ThresholdBelowMinimum()
             | _ =>
         }
 
@@ -192,21 +192,21 @@ contract Multisig {
 
     // Only signers can call this.
     public function approve(nonce_: uint256) -> () {
-        require(isSigner(caller()), Error(0x12345678)); // NotASigner()
+        require(isSigner(caller()), Error(0xda0357f7)); // NotASigner()
         perform_approve(nonce_, caller());
     }
 
     function perform_approve(nonce_: uint256, signer: address) -> () {
-        require(nonce_ < operations_count, Error(0x12345678)); // OperationNotFound()
+        require(nonce_ < operations_count, Error(0xf046c770)); // OperationNotFound()
 
         // TODO: emit log
 
         match status[nonce_] {
             | OperationStatus.Approvals(count) =>
-                require(votes[nonce_][signer] == Vote.None, Error(0x12345678)); // SignerAlreadyApproved()
+                require(votes[nonce_][signer] == Vote.None, Error(0x2acb3fbc)); // SignerAlreadyApproved()
                 votes[nonce_][signer] = Vote.Approved;
                 status[nonce_] = OperationStatus.Approvals(count + 1);
-            | _ => revertWithError(Error(0x12345678)); // UnexpectedStatus()
+            | _ => revertWithError(Error(0xe12bcce7)); // UnexpectedStatus()
         }
     }
 
@@ -214,15 +214,15 @@ contract Multisig {
         match signature {
             | Signature.ECDSA(r, s) =>
                 let signer = eip2098_signer(hash, r, s);
-                require(isSigner(signer), Error(0x12345678)); // NotASigner()
+                require(isSigner(signer), Error(0xda0357f7)); // NotASigner()
                 return signer;
             | Signature.Contract(contract_) =>
-                require(isSigner(contract_), Error(0x12345678)); // NotASigner()
-                require(check_contract_hash(contract_, hash), Error(0x12345678)); // HashNotApprovedByTarget()
+                require(isSigner(contract_), Error(0xda0357f7)); // NotASigner()
+                require(check_contract_hash(contract_, hash), Error(0x14d686e3)); // HashNotApprovedByTarget()
                 return contract_;
             | Signature.EIP1271(contract_, signature) =>
-                require(isSigner(contract_), Error(0x12345678)); // NotASigner()
-                require(eip1271_verify(contract_, hash, signature), Error(0x12345678)); // EIP1271VerificationRejected()
+                require(isSigner(contract_), Error(0xda0357f7)); // NotASigner()
+                require(eip1271_verify(contract_, hash, signature), Error(0x1dbcfbd8)); // EIP1271VerificationRejected()
                 return contract_;
         }
     }
@@ -340,12 +340,12 @@ contract Multisig {
 
     // Only signers can call this.
     public function reject(nonce_: uint256) -> () {
-        require(isSigner(caller()), Error(0x12345678)); // NotASigner()
+        require(isSigner(caller()), Error(0xda0357f7)); // NotASigner()
         perform_reject(nonce_, caller());
     }
 
     function perform_reject(nonce_: uint256, signer: address) -> () {
-        require(nonce_ < operations_count, Error(0x12345678)); // OperationNotFound()
+        require(nonce_ < operations_count, Error(0xf046c770)); // OperationNotFound()
 
         // TODO: emit log
 
@@ -353,7 +353,7 @@ contract Multisig {
             | OperationStatus.Approvals(count) =>
                 status[nonce_] = OperationStatus.Rejected;
                 votes[nonce_][signer] = Vote.Rejected;
-            | _ => revertWithError(Error(0x12345678)); // UnexpectedStatus()
+            | _ => revertWithError(Error(0xe12bcce7)); // UnexpectedStatus()
         }
     }
 
@@ -361,21 +361,21 @@ contract Multisig {
     // Payload is optional, used in case UnstoredCall is encountered.
     public function execute(nonce_: uint256, payload: memory(bytes)) -> () {
         // Ensure status.
-        require(nonce_ < operations_count, Error(0x12345678)); // OperationNotFound()
+        require(nonce_ < operations_count, Error(0xf046c770)); // OperationNotFound()
 
         // Enforce strict sequence ordering.
-        require(nonce_ == nonce, Error(0x12345678)); // IncorrectSequence()
+        require(nonce_ == nonce, Error(0x0afc4171)); // IncorrectSequence()
         match status[nonce_] {
             | OperationStatus.Rejected =>
                 nonce += 1;
                 // Special case for rejections: we operate as a no-op.
                 return ();
             | OperationStatus.Approvals(count) =>
-                require(count >= signers_required, Error(0x12345678)); // NotEnoughApprovals()
+                require(count >= signers_required, Error(0x24bcdbea)); // NotEnoughApprovals()
                 nonce += 1;
                 // Update status.
                 status[nonce_] = OperationStatus.Executed;
-            | _ => revertWithError(Error(0x12345678)); // IncorrectStatus();
+            | _ => revertWithError(Error(0x2d14d20e)); // IncorrectStatus();
         }
 
         // TODO: emit log
@@ -385,7 +385,7 @@ contract Multisig {
             | Operation.AddSigner(signer) => add_signer(signer);
             | Operation.RemoveSigner(signer) => remove_signer(signer);
             | Operation.ChangeSigRequired(count) =>
-                require(count <= signers_count, Error(0x12345678)); // ThresholdExceedsSigners()
+                require(count <= signers_count, Error(0x4a3d5baa)); // ThresholdExceedsSigners()
                 signers_required = count;
             | Operation.TransferEth(target, amount) =>
                 let ret: word;
@@ -394,13 +394,13 @@ contract Multisig {
                 assembly {
                     ret := call(gas(), target_, amount_, 0, 0, 0, 0)
                 }
-                require(tobool(ret), Error(0x12345678)); // EtherTransferFailed()
+                require(tobool(ret), Error(0x6747a288)); // EtherTransferFailed()
             | Operation.TransferToken(target, token, amount) =>
                 safe_erc20_transfer(token, target, amount);
             | Operation.Call(target, value, payload) =>
-                require(arbitrary_call(target, value, payload), Error(0x12345678)); // CallFailed()
+                require(arbitrary_call(target, value, payload), Error(0x3204506f)); // CallFailed()
             | Operation.UnstoredCall(hash) =>
-                require(hash == keccak256_(payload), Error(0x12345678)); // InvalidPayloadSupplied()
+                require(hash == keccak256_(payload), Error(0xe2af0df0)); // InvalidPayloadSupplied()
                 let ret: word;
                 let payload_ = Typedef.rep(payload);
                 assembly {
@@ -413,14 +413,14 @@ contract Multisig {
                     let value := mload(add(payload_, 64))
                     ret := call(gas(), target, value, add(payload_, 96), sub(size, 64), 0, 0)
                 }
-                require(tobool(ret), Error(0x12345678)); // UnstoredCallFailed()
+                require(tobool(ret), Error(0x4e9268f6)); // UnstoredCallFailed()
             | Operation.ApproveSignedHash(hash) =>
                 // Sanity check.
-                require(!approved_signed_hashes[hash], Error(0x12345678)); // ApprovedSignedHashExist()
+                require(!approved_signed_hashes[hash], Error(0xff80a9e5)); // ApprovedSignedHashExist()
                 approved_signed_hashes[hash] = true;
             | Operation.RevokeSignedHash(hash) =>
                 // Sanity check.
-                require(approved_signed_hashes[hash], Error(0x12345678)); // ApprovedSignedHashDoesNotExist()
+                require(approved_signed_hashes[hash], Error(0xa465cdf7)); // ApprovedSignedHashDoesNotExist()
                 approved_signed_hashes[hash] = false;
             | _ => unimplemented(); // TODO
         }
@@ -428,7 +428,7 @@ contract Multisig {
 
     payable fallback() -> () {
         // Accept incoming payments if no selector is hit.
-        require(calldatasize() == 0, Error(0x12345678)); // UnexpectedEtherTransfer()
+        require(calldatasize() == 0, Error(0x9c0ebd3c)); // UnexpectedEtherTransfer()
 
         // TODO: emit log
     }
@@ -436,9 +436,9 @@ contract Multisig {
     // ERC-1271 receiver -- external verifiers call this, so it must be dispatched.
     // NOTE: view function.
     public function isValidSignature(hash: bytes32, signature: memory(bytes)) -> bytes4 {
-        require(approved_signed_hashes[hash], Error(0x12345678)); // HashNotApproved();
+        require(approved_signed_hashes[hash], Error(0x202643f6)); // HashNotApproved();
         let signature_ = Typedef.rep(signature);
-        require(mload(signature_) == 0, Error(0x12345678)); // EmptySignatureExpected()
+        require(mload(signature_) == 0, Error(0x10bbbc9b)); // EmptySignatureExpected()
         // TODO: consider pass-through signature checking if the hash is not found (needs passing data and not hash)
         return bytes4(0x1626ba7e);
     }
@@ -456,13 +456,13 @@ contract Multisig {
     }
 
     function add_signer(signer: address) -> () {
-        require(!isSigner(signer), Error(0x12345678)); // SignerAlreadyExists()
+        require(!isSigner(signer), Error(0x38615ecc)); // SignerAlreadyExists()
         signers[signers_count] = signer;
         signers_count += 1;
     }
 
     function remove_signer(signer: address) -> () {
-        require(signers_count > 1, Error(0x12345678)); // CannotRemoveOnlySigner()
+        require(signers_count > 1, Error(0x82df8145)); // CannotRemoveOnlySigner()
         for (let i = 0; i < signers_count; i += 1) {
             if (signers[i] == signer) {
                 // Move last signer into this place.
@@ -475,7 +475,7 @@ contract Multisig {
                 return ();
             }
         }
-        revertWithError(Error(0x12345678)); // NotASigner()
+        revertWithError(Error(0xda0357f7)); // NotASigner()
     }
 }
 
