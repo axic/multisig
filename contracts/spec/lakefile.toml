@@ -1,0 +1,5 @@
+name = "WalletSpec"
+defaultTargets = ["WalletSpec"]
+
+[[lean_lib]]
+name = "WalletSpec"
