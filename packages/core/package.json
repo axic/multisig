@@ -26,6 +26,9 @@
     "viem": "^2.21.45"
   },
   "devDependencies": {
+    "@ethereumjs/common": "^4.4.0",
+    "@ethereumjs/evm": "^3.1.1",
+    "@ethereumjs/util": "^9.1.0",
     "vitest": "^2.1.8"
   }
 }
