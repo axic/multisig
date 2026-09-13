@@ -45,7 +45,7 @@ export function OperationRow({
               <span className="font-mono text-[11px] uppercase tracking-label text-muted">#{op.index}</span>
               <span className="text-sm font-medium">{op.kind}</span>
             </div>
-            <span className="truncate text-[13px] text-body">{operationSummary(op.op)}</span>
+            <span className="truncate text-[13px] text-body">{operationSummary(op.op, wallet.chainId)}</span>
           </div>
         </div>
         <div className="flex-none text-right">

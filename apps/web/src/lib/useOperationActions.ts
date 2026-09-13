@@ -16,6 +16,7 @@ import { getPreimage, savePreimage } from "./registry.js";
 /** Discriminated input for queueing a new operation from a form. */
 export type QueueInput =
   | { kind: "TransferEth"; target: Address; amount: bigint }
+  | { kind: "TransferToken"; target: Address; token: Address; amount: bigint } // ERC-20, base units
   | { kind: "UnstoredCall"; target: Address; value: bigint; payload: Hex } // arbitrary call
   | { kind: "AddSigner"; signer: Address }
   | { kind: "RemoveSigner"; signer: Address }
@@ -29,6 +30,10 @@ function buildQueue(input: QueueInput): {
   switch (input.kind) {
     case "TransferEth":
       return { op: { tag: "TransferEth", target: input.target, amount: input.amount } };
+    case "TransferToken":
+      return {
+        op: { tag: "TransferToken", target: input.target, token: input.token, amount: input.amount },
+      };
     case "UnstoredCall": {
       const hash = unstoredCallHash(input.target, input.value, input.payload);
       return {

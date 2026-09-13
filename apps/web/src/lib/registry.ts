@@ -1,9 +1,10 @@
 import { getAddress, type Address, type Hex } from "viem";
+import type { TokenMeta } from "./erc20.js";
 
 /**
  * Browser-local persistence — the last thing the app used the backend DB for.
  *
- * Two stores, both in `localStorage`:
+ * Three stores, all in `localStorage`:
  *
  *  - **Tracked wallets**: which Multisig addresses to list on the home page.
  *    All of a wallet's *state* is read from chain (see `multisig.ts`); this is
@@ -14,12 +15,18 @@ import { getAddress, type Address, type Hex } from "viem";
  *    chain, so the `[target][value][payload]` preimage must be kept somewhere to
  *    supply at execute time. This replaces the DB's `UnstoredCallPreimage`.
  *
+ *  - **Token metadata**: a `TransferToken` op carries a raw base-unit amount, so
+ *    rendering it as "1.5 USDC" needs the token's decimals/symbol. Purely a
+ *    display cache — the amount on chain is authoritative, and a miss just
+ *    falls back to showing base units.
+ *
  * Everything is keyed so it round-trips through JSON; addresses are checksummed
  * on the way in and hashes lower-cased for stable keys.
  */
 
 const WALLETS_KEY = "multisig.trackedWallets.v1";
 const PREIMAGES_KEY = "multisig.preimages.v1";
+const TOKENS_KEY = "multisig.tokens.v1";
 
 function read<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -96,4 +103,24 @@ export function savePreimage(hash: Hex, preimage: StoredPreimage): void {
 
 export function getPreimage(hash: Hex): StoredPreimage | undefined {
   return read<PreimageMap>(PREIMAGES_KEY, {})[hash.toLowerCase()];
+}
+
+// ─── token metadata (display cache) ──────────────────────────────────────────
+
+type TokenMap = Record<string, TokenMeta>;
+
+const tokenKey = (chainId: number, token: string) => `${chainId}:${getAddress(token)}`;
+
+export function saveTokenMeta(chainId: number, meta: TokenMeta): void {
+  const map = read<TokenMap>(TOKENS_KEY, {});
+  map[tokenKey(chainId, meta.address)] = { ...meta, address: getAddress(meta.address) };
+  write(TOKENS_KEY, map);
+}
+
+export function getTokenMeta(chainId: number, token: string): TokenMeta | undefined {
+  try {
+    return read<TokenMap>(TOKENS_KEY, {})[tokenKey(chainId, token)];
+  } catch {
+    return undefined; // not an address
+  }
 }
