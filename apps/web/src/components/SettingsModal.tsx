@@ -4,6 +4,7 @@ import type { WalletState } from "../lib/multisig.js";
 import { useQueueOperation, type QueueInput } from "../lib/useOperationActions.js";
 import { Address } from "./data.js";
 import { Button } from "./Button.js";
+import { ErrorNotice } from "./ErrorNotice.js";
 import { Input } from "./Input.js";
 import { Modal } from "./Modal.js";
 
@@ -123,7 +124,13 @@ export function SettingsModal({
         <Input label={`Threshold (1…${wallet.signersCount})`} value={threshold} onChange={(e) => setThreshold(e.target.value)} />
       )}
 
-      {(localErr || queue.error) && <span className="text-xs text-signal">{localErr ?? queue.error?.message}</span>}
+      {/* A validation message is about the input in front of you, so it still
+          shadows a stale failure from a previous attempt. */}
+      {localErr ? (
+        <span className="text-xs text-signal">{localErr}</span>
+      ) : (
+        <ErrorNotice error={queue.error} action="Queueing" />
+      )}
     </Modal>
   );
 }

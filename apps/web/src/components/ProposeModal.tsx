@@ -3,6 +3,7 @@ import { getAddress, isAddress, isHex, parseEther } from "viem";
 import type { WalletState } from "../lib/multisig.js";
 import { useQueueOperation, type QueueInput } from "../lib/useOperationActions.js";
 import { Button } from "./Button.js";
+import { ErrorNotice } from "./ErrorNotice.js";
 import { Input } from "./Input.js";
 import { Modal } from "./Modal.js";
 
@@ -104,7 +105,7 @@ export function ProposeModal({
         </label>
       )}
 
-      {queue.error && <span className="text-xs text-signal">{queue.error.message}</span>}
+      <ErrorNotice error={queue.error} action="Queueing" />
     </Modal>
   );
 }
