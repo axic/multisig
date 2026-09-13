@@ -124,9 +124,9 @@ function WalletView({ wallet }: { wallet: WalletState }) {
       <Card title="Signers" flush>
         <div className="flex flex-col gap-px bg-line">
           {wallet.signers.map((s, i) => (
-            <div key={s} className="flex items-center justify-between bg-paper px-6 py-3.5">
-              <Address value={s} />
-              <span className="font-mono text-[11px] uppercase tracking-label text-muted">#{i}</span>
+            <div key={s} className="flex items-center justify-between gap-4 bg-paper px-6 py-3.5">
+              <Address value={s} full className="break-all" />
+              <span className="shrink-0 font-mono text-[11px] uppercase tracking-label text-muted">#{i}</span>
             </div>
           ))}
           {wallet.signers.length === 0 && <div className="bg-paper px-6 py-4 text-sm text-muted">No signers.</div>}

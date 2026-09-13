@@ -107,12 +107,12 @@ export function SettingsModal({
                 type="button"
                 onClick={() => setRemoveAddr(s)}
                 className={[
-                  "flex items-center justify-between bg-paper px-3.5 py-2.5 text-left transition-colors hover:bg-panel",
+                  "flex items-center justify-between gap-3 bg-paper px-3.5 py-2.5 text-left transition-colors hover:bg-panel",
                   removeAddr === s ? "outline outline-1 outline-ink" : "",
                 ].join(" ")}
               >
-                <Address value={s} />
-                {removeAddr === s && <span className="font-mono text-[11px] text-signal">selected</span>}
+                <Address value={s} full className="break-all" />
+                {removeAddr === s && <span className="shrink-0 font-mono text-[11px] text-signal">selected</span>}
               </button>
             ))}
           </div>
