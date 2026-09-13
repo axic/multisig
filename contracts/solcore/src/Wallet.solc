@@ -227,41 +227,11 @@ contract Multisig {
         // appended verbatim. Per EIP-712 a dynamic `bytes` member is encoded as
         // its keccak256, so hashStruct binds the very same information the raw
         // preimage used to -- now under a domain-separated 0x1901 digest.
-        //
-        // TODO: collapse the `operation` encoding to abi_encode(operation) once
-        // std's generic ABIEncode supports *dynamic* sums. Today sum:ABIEncode
-        // in std.ABIGeneric is "static sums only" (it writes [tag][payload]
-        // inline with no offset-into-tail handling), while Operation is a
-        // dynamic sum -- its Call(address, uint256, memory(bytes)) branch drags
-        // a dynamic field in -- so abi_encode(operation) cannot be encoded
-        // correctly yet. The dynamic-sum ABIDecode already exists; the symmetric
-        // encode is the missing half.
-        let op_bytes: memory(bytes);
-        match operation {
-            | Operation.AddSigner(signer) =>
-                op_bytes = concat(bytes32(0), bytes32(Typedef.rep(signer)));
-            | Operation.RemoveSigner(signer) =>
-                op_bytes = concat(bytes32(1), bytes32(Typedef.rep(signer)));
-            | Operation.ChangeSigRequired(count) =>
-                op_bytes = concat(bytes32(2), bytes32(Typedef.rep(count)));
-            | Operation.TransferEth(target, amount) =>
-                op_bytes = concat(concat(bytes32(3), bytes32(Typedef.rep(target))), bytes32(Typedef.rep(amount)));
-            | Operation.TransferToken(target, token, amount) =>
-                op_bytes = concat(concat(concat(bytes32(4), bytes32(Typedef.rep(target))), bytes32(Typedef.rep(token))), bytes32(Typedef.rep(amount)));
-            | Operation.Call(target, value, payload) =>
-                op_bytes = concat(concat(concat(bytes32(5), bytes32(Typedef.rep(target))), bytes32(Typedef.rep(value))), payload);
-            | Operation.UnstoredCall(hash) =>
-                op_bytes = concat(bytes32(6), hash);
-            | Operation.ApproveSignedHash(hash) =>
-                op_bytes = concat(bytes32(7), hash);
-            | Operation.RevokeSignedHash(hash) =>
-                op_bytes = concat(bytes32(8), hash);
-        }
 
         // hashStruct(message) = keccak256(typeHash || kind || keccak256(operation))
         let typeHash = keccakLit("MultisigOperation(uint256 kind,bytes operation)");
         let structHash = keccak256_(
-            concat(concat(bytes32(typeHash), operation_kind_tag(kind)), keccak256_(op_bytes))
+            concat(concat(bytes32(typeHash), operation_kind_tag(kind)), keccak256_(abi_encode(operation)))
         );
 
         // Domain: EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)
