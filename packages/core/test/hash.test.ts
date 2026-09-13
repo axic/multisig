@@ -1,4 +1,4 @@
-import { getAddress, keccak256, toHex, type Address } from "viem";
+import { getAddress, keccak256, toHex, type Address, type Hex } from "viem";
 import { describe, expect, it } from "vitest";
 import {
   domainSeparator,
@@ -6,26 +6,44 @@ import {
   operationSigningHash,
   operationStructHash,
 } from "../src/hash.js";
-import type { Operation } from "../src/operations.js";
+import { encodeOperation } from "../src/operationCodec.js";
+import type { Operation, OperationKind } from "../src/operations.js";
 import { unstoredCallHash, unstoredCallPayload } from "../src/preimage.js";
+import vectors from "./vectors/multisig.json" with { type: "json" };
 
 const CTX = { chainId: 11155111, verifyingContract: getAddress("0x00000000000000000000000000000000000000a1") as Address };
 
 describe("create_signature_hash (EIP-712) — mirrors the contract", () => {
-  it("encodes the flat operation preimage [tag][fields]", () => {
-    // AddSigner(cafe0001): tag 0 word + address word.
+  // The signed `bytes operation` member is abi_encode(operation) — the same
+  // bytes queue(Operation) carries, not a separate preimage format.
+  it("signs the abi_encode(operation) bytes", () => {
     const op: Operation = { tag: "AddSigner", signer: getAddress("0x00000000000000000000000000000000cafe0001") };
-    expect(operationPreimage(op)).toBe(
-      "0x" +
-        "0000000000000000000000000000000000000000000000000000000000000000" +
-        "00000000000000000000000000000000000000000000000000000000cafe0001",
-    );
-    // ChangeSigRequired(2): tag 2 word + count word.
-    expect(operationPreimage({ tag: "ChangeSigRequired", count: 2n })).toBe(
-      "0x" +
-        "0000000000000000000000000000000000000000000000000000000000000002" +
-        "0000000000000000000000000000000000000000000000000000000000000002",
-    );
+    expect(operationPreimage(op)).toBe(encodeOperation(op));
+    expect(operationPreimage(op)).toBe(vectors.sum.queue_addSigner.returndata);
+  });
+
+  // Digests read back from the contract's own getSignatureHash(kind, operation)
+  // by executing the deployed runtime — this is the real cross-check.
+  const { _context: ctx, cases } = vectors.signatureHash;
+  const SIGNING_CTX = {
+    chainId: ctx.chainId,
+    verifyingContract: getAddress(ctx.verifyingContract) as Address,
+  };
+  const operationOf = (name: string): Operation => {
+    const v = (vectors.sum as Record<string, { operation: Record<string, string> }>)[`queue_${name}`].operation;
+    const out: Record<string, unknown> = { ...v };
+    for (const key of ["count", "amount", "value"]) if (key in out) out[key] = BigInt(out[key] as string);
+    for (const key of ["signer", "target", "token"]) if (key in out) out[key] = getAddress(out[key] as string);
+    return out as unknown as Operation;
+  };
+
+  it("matches the on-chain digest for every kind x variant", () => {
+    expect(cases).toHaveLength(27);
+    for (const c of cases) {
+      const op = operationOf(c.operation);
+      expect(operationPreimage(op)).toBe(c.preimage);
+      expect(operationSigningHash(c.kind as OperationKind, op, SIGNING_CTX)).toBe(c.digest as Hex);
+    }
   });
 
   it("produces 32-byte digests bound to chain + contract", () => {

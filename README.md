@@ -56,11 +56,14 @@ on-chain.** Consequences:
 
 ## Contract ABI notes
 
-- **`create_signature_hash` is a real EIP-712 digest** on the `wallet` branch:
-  domain `Multisig`/`1`/chainId/verifyingContract, message
-  `MultisigOperation(uint256 kind,bytes operation)` with a flat `[tag][fields]`
-  operation preimage. Implemented in `packages/core/src/hash.ts` (mirrors the
-  contract; used by the relay layer, a later phase).
+- **`create_signature_hash` is a real EIP-712 digest**: domain
+  `Multisig`/`1`/chainId/verifyingContract, message
+  `MultisigOperation(uint256 kind,bytes operation)` where `operation` is
+  `abi_encode(operation)` — the same ADT bytes `queue(Operation)` carries, so
+  there is one encoder, not a separate preimage format. Implemented in
+  `packages/core/src/hash.ts` and cross-checked against the contract's own
+  `getSignatureHash(kind, operation)` for every kind x variant (used by the
+  relay layer, a later phase).
 - **`Operation` uses Solcore's ADT ABI** — a multi-constructor ADT is
   discriminated on the wire by one `keccak256("Name(argSigs)")` tag word.
   `Operation` is dynamic (its `Call(address,uint256,bytes)` variant carries a

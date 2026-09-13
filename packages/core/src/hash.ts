@@ -8,6 +8,7 @@ import {
   type Address,
   type Hex,
 } from "viem";
+import { encodeOperation } from "./operationCodec.js";
 import { OPERATION_KIND_TAGS, type Operation, type OperationKind } from "./operations.js";
 
 /**
@@ -18,16 +19,16 @@ import { OPERATION_KIND_TAGS, type Operation, type OperationKind } from "./opera
  *   keccak256(0x1901 || domainSeparator || hashStruct(message))
  * with message type `MultisigOperation(uint256 kind,bytes operation)` where:
  *   - `kind`      is 0/1/2 for Queue/Approve/Reject;
- *   - `operation` is a FLAT `[tag word][field words...]` byte string — tag is
- *     the plain variant index 0..8 (NOT the nested-binary-sum used by queue()
- *     calldata), scalar fields as 32-byte words, and `Call`'s dynamic payload
- *     appended verbatim. Per EIP-712 the dynamic `bytes` member is hashed, so
- *     hashStruct binds `keccak256(operation)`.
+ *   - `operation` is `abi_encode(operation)` — the SAME ADT wire bytes that
+ *     `queue(Operation)` takes as its argument (see ./operationCodec.ts). Per
+ *     EIP-712 the dynamic `bytes` member is hashed, so hashStruct binds
+ *     `keccak256(operation)`.
  * Domain: `EIP712Domain(string name,string version,uint256 chainId,address
  * verifyingContract)` with name "Multisig", version "1".
  *
- * NOTE: faithful to the Solidity but not yet cross-checked against an on-chain
- * digest (no devnet here); the unit tests pin the sub-hashes to guard the shape.
+ * Cross-checked against the contract's own `getSignatureHash(kind, operation)`
+ * getter for every kind x variant — see test/vectors/multisig.json
+ * `signatureHash`, captured by executing the deployed runtime.
  */
 export interface SigningContext {
   chainId: number | bigint;
@@ -36,33 +37,17 @@ export interface SigningContext {
 }
 
 const w = (h: Hex): Hex => padHex(h, { size: 32 });
-// Casing is irrelevant to keccak (it hashes bytes), but emit canonical lowercase.
-const addrWord = (a: Address): Hex => padHex(getAddress(a).toLowerCase() as Hex, { size: 32 });
 
-/** The flat `[tag][fields...]` preimage the struct hash binds via keccak256. */
+/**
+ * The `bytes operation` member of the signed struct: `abi_encode(operation)`.
+ *
+ * The contract used to hand-roll a flat `[variant index][fields]` preimage here
+ * because the generic encoder could not place a dynamic sum. It can now, so
+ * `create_signature_hash` just calls `abi_encode(operation)` and this is the
+ * identical byte string `queue(Operation)` carries — one encoder, one format.
+ */
 export function operationPreimage(operation: Operation): Hex {
-  const tag = (n: number): Hex => w(toHex(n));
-  switch (operation.tag) {
-    case "AddSigner":
-      return concatHex([tag(0), addrWord(operation.signer)]);
-    case "RemoveSigner":
-      return concatHex([tag(1), addrWord(operation.signer)]);
-    case "ChangeSigRequired":
-      return concatHex([tag(2), w(toHex(operation.count))]);
-    case "TransferEth":
-      return concatHex([tag(3), addrWord(operation.target), w(toHex(operation.amount))]);
-    case "TransferToken":
-      return concatHex([tag(4), addrWord(operation.target), addrWord(operation.token), w(toHex(operation.amount))]);
-    case "Call":
-      // payload appended verbatim (unpadded), matching the contract.
-      return concatHex([tag(5), addrWord(operation.target), w(toHex(operation.value)), operation.payload]);
-    case "UnstoredCall":
-      return concatHex([tag(6), operation.hash]);
-    case "ApproveSignedHash":
-      return concatHex([tag(7), operation.hash]);
-    case "RevokeSignedHash":
-      return concatHex([tag(8), operation.hash]);
-  }
+  return encodeOperation(operation);
 }
 
 const DOMAIN_TYPEHASH = keccak256(
