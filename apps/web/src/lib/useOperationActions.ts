@@ -74,6 +74,36 @@ export function useQueueOperation(wallet: WalletState, onDone: () => void) {
   });
 }
 
+/** The failure of the last action taken on the queue, ready to render. */
+export interface ActionFailure {
+  /** Names what failed, as a noun: "Approval", "Execution". */
+  action: string;
+  error: unknown;
+}
+
+/** One of the three actions, as far as reporting its outcome needs to know. */
+interface ActionAttempt {
+  action: string;
+  error: unknown;
+  submittedAt: number;
+}
+
+/**
+ * The outcome of the most recent attempt, and only if it failed.
+ *
+ * A row disables every one of its buttons while any action is in flight, so
+ * these three are mutually exclusive and one message is enough. Rendering each
+ * mutation's own `error` instead would leave a failure from an earlier click
+ * sitting under the queue long after a later action succeeded — next to a row
+ * it has nothing to do with.
+ */
+function lastFailure(attempts: ActionAttempt[]): ActionFailure | undefined {
+  // `submittedAt` is 0 until a mutation first runs, so an untouched queue
+  // settles on the first entry, which has no error.
+  const last = attempts.reduce((a, b) => (b.submittedAt > a.submittedAt ? b : a));
+  return last.error ? { action: last.action, error: last.error } : undefined;
+}
+
 /** approve / reject / execute an existing operation (signer/anyone on-chain). */
 export function useOperationActions(wallet: WalletState, onDone: () => void) {
   const { address: account } = useAccount();
@@ -119,5 +149,11 @@ export function useOperationActions(wallet: WalletState, onDone: () => void) {
     onSuccess: onDone,
   });
 
-  return { approve, reject, execute };
+  const failure = lastFailure([
+    { action: "Approval", error: approve.error, submittedAt: approve.submittedAt },
+    { action: "Rejection", error: reject.error, submittedAt: reject.submittedAt },
+    { action: "Execution", error: execute.error, submittedAt: execute.submittedAt },
+  ]);
+
+  return { approve, reject, execute, failure };
 }

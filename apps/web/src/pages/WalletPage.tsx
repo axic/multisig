@@ -8,6 +8,7 @@ import {
   Amount,
   Button,
   Card,
+  ErrorNotice,
   Label,
   OperationRow,
   ProposeModal,
@@ -144,6 +145,10 @@ function WalletView({ wallet }: { wallet: WalletState }) {
             ))}
           </div>
         )}
+        {/* Approve / reject / execute are only ever started from a queue row,
+            so their failure belongs here, under the buttons that caused it —
+            not at the foot of the page, past the history. */}
+        {actions.failure && <ErrorNotice error={actions.failure.error} action={actions.failure.action} />}
       </div>
 
       {history.length > 0 && (
@@ -155,12 +160,6 @@ function WalletView({ wallet }: { wallet: WalletState }) {
             ))}
           </div>
         </div>
-      )}
-
-      {(actions.approve.error || actions.execute.error || actions.reject.error) && (
-        <p className="text-sm text-signal">
-          {(actions.approve.error ?? actions.execute.error ?? actions.reject.error)?.message}
-        </p>
       )}
 
       <ProposeModal wallet={wallet} open={proposeOpen} onClose={() => setProposeOpen(false)} onDone={refresh} />
