@@ -8,7 +8,7 @@ import { encodeOperation } from "./operationCodec.js";
  *
  * The OUTER layer (nonce / bytes args) is standard Solidity ABI and is fully
  * implemented + covered by the golden vectors. The `Operation` argument of
- * queue() uses Solcore's non-standard sum encoding and is delegated to
+ * queue() uses Solcore's ADT wire format and is delegated to
  * ./operationCodec.ts.
  */
 

@@ -2,135 +2,231 @@ import {
   concatHex,
   getAddress,
   hexToBigInt,
+  keccak256,
   padHex,
   size,
   slice,
   toHex,
   type Hex,
 } from "viem";
-import { OPERATION_TAGS, type Operation } from "./operations.js";
+import { OPERATION_TAGS, type Operation, type OperationTag } from "./operations.js";
 
 /**
- * Codec for the Solcore `Operation` sum type as `queue(Operation)` calldata.
+ * Codec for Solcore ADTs on the ABI wire — the `Operation` sum as
+ * `queue(Operation)` calldata and as the `getOperation` return.
  *
- * Solcore encodes a sum as a RIGHT-NESTED BINARY SUM ("sum-wide-product"):
+ * ## Wire format
  *
- *   - The variant is selected by a run of one-word tags: `1` = inr (go deeper),
- *     terminated by a single `0` = inl (take this branch). So variant index k
- *     is `k` ones followed by a `0` — except the LAST variant (index 8), which
- *     is 8 ones with no trailing `0` (it is the terminal inr).
- *   - The variant's product fields follow inline, one 32-byte word per scalar.
- *   - The whole thing is zero-padded to a fixed width — the widest variant —
- *     which the golden vectors pin at 10 words (see ../test/vectors).
+ * A multi-constructor ADT is discriminated by ONE 32-byte tag word,
+ * `keccak256("Name(argSigs)")` — the same shape a method selector hashes, kept
+ * at full width. (Solcore's *internal* representation is still a right-nested
+ * `inl`/`inr` sum; only the ABI boundary carries the keccak tag. See
+ * std/ABIGeneric.solc `encodeVariant` / `abiSumReader` and the per-type
+ * instances DeriveGeneric emits.)
  *
- * Verified against test/vectors/multisig.json for AddSigner + ChangeSigRequired.
- * `Call(address,uint256,bytes)` carries a DYNAMIC `bytes` payload that this
- * static encoder can't place; queue it as an `UnstoredCall` instead (hash
- * on-chain, preimage `[address][value][payload]` supplied at execute time).
+ * Whether the tag+fields sit inline or behind an offset follows the ordinary
+ * ABI static/dynamic rule, decided on the ADT's structural representation:
+ *
+ *   static ADT  (no variant carries a dynamic field)
+ *       [tag][variant fields…]                         inline, `headSize` wide
+ *
+ *   dynamic ADT (some variant carries `bytes`)
+ *       head: [offset]                                 one word
+ *       body: [tag][variant fields…][dynamic tails…]   `BODY_SIZE` wide
+ *
+ * `Operation` is dynamic — `Call(address,uint256,bytes)` drags a dynamic field
+ * in — so every operation on the wire is `[0x20][tag][fields…]`, the body
+ * padded out to the widest variant. Offsets inside the body (the `Call`
+ * payload) are relative to the body, not to the start of the data.
+ *
+ * Verified by executing the deployed runtime: see test/vectors/multisig.json,
+ * whose `sum` entries are the calldata/returndata this contract actually
+ * accepts and produces.
  */
 
-/** Fixed encoded width, in 32-byte words (the widest variant). */
-export const OPERATION_WORDS = 10;
 const WORD = 32;
-const ZERO = padHex("0x", { size: WORD });
 
-function variantIndex(tag: Operation["tag"]): number {
-  const i = OPERATION_TAGS.indexOf(tag);
-  if (i < 0) throw new Error(`unknown Operation tag: ${tag}`);
-  return i;
+/** ABI signature of a field, in Solcore's `SigString` spelling. */
+type FieldSig = "address" | "uint256" | "bytes32" | "bytes";
+
+/**
+ * Each variant's fields, in declaration order, paired with the Operation
+ * property they map to. The signature string feeds the tag hash, so these
+ * spellings are load-bearing: renaming a constructor or retyping a field
+ * changes the tag and silently breaks the wire.
+ */
+const VARIANT_FIELDS: Record<OperationTag, readonly (readonly [string, FieldSig])[]> = {
+  AddSigner: [["signer", "address"]],
+  RemoveSigner: [["signer", "address"]],
+  ChangeSigRequired: [["count", "uint256"]],
+  TransferEth: [
+    ["target", "address"],
+    ["amount", "uint256"],
+  ],
+  TransferToken: [
+    ["target", "address"],
+    ["token", "address"],
+    ["amount", "uint256"],
+  ],
+  Call: [
+    ["target", "address"],
+    ["value", "uint256"],
+    ["payload", "bytes"],
+  ],
+  UnstoredCall: [["hash", "bytes32"]],
+  ApproveSignedHash: [["hash", "bytes32"]],
+  RevokeSignedHash: [["hash", "bytes32"]],
+};
+
+/** `keccak256("Name(argSigs)")` — the variant's wire discriminant. */
+export function variantTag(tag: OperationTag): Hex {
+  const args = VARIANT_FIELDS[tag].map(([, sig]) => sig).join(",");
+  return keccak256(toHex(`${tag}(${args})`));
 }
 
-/** The tag-word prefix selecting variant `k` (k ones, then inl unless last). */
-function tagWords(k: number): Hex[] {
-  const words: Hex[] = [];
-  for (let i = 0; i < k; i++) words.push(padHex("0x01", { size: WORD }));
-  if (k < OPERATION_TAGS.length - 1) words.push(ZERO); // terminating inl
-  return words;
+const TAG_OF = new Map<OperationTag, Hex>(OPERATION_TAGS.map((t) => [t, variantTag(t)]));
+const TAG_TO_VARIANT = new Map<Hex, OperationTag>([...TAG_OF].map(([t, h]) => [h, t]));
+
+/** Head width of one variant's field product (a dynamic field contributes its offset word). */
+const variantHead = (tag: OperationTag): number => VARIANT_FIELDS[tag].length * WORD;
+
+/**
+ * Bytes the body occupies: the tag word plus the widest variant's head. Every
+ * variant reserves the same width (shorter ones are zero-padded), which is what
+ * makes the body's dynamic tails start at a variant-independent offset.
+ */
+export const OPERATION_BODY_SIZE =
+  WORD + Math.max(...OPERATION_TAGS.map(variantHead));
+
+// ─── encoding ────────────────────────────────────────────────────────────────
+
+/** A byte buffer that grows on write and zero-fills the gaps. */
+class Region {
+  private bytes: number[] = [];
+
+  write(at: number, hex: Hex): void {
+    const raw = hex.slice(2);
+    while (this.bytes.length < at + raw.length / 2) this.bytes.push(0);
+    for (let i = 0; i < raw.length; i += 2) {
+      this.bytes[at + i / 2] = parseInt(raw.slice(i, i + 2), 16);
+    }
+  }
+
+  pad(to: number): void {
+    while (this.bytes.length < to) this.bytes.push(0);
+  }
+
+  hex(): Hex {
+    return `0x${this.bytes.map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+  }
 }
 
-// Lowercase the (validated) address: calldata is raw bytes, and the golden
-// vectors carry the un-checksummed form.
-const addrWord = (a: string): Hex => padHex(getAddress(a).toLowerCase() as Hex, { size: WORD });
 const uintWord = (n: bigint): Hex => padHex(toHex(n), { size: WORD });
-function b32Word(h: Hex): Hex {
-  if (size(h) !== WORD) throw new Error(`expected bytes32, got ${size(h)} bytes`);
-  return h;
-}
+const addrWord = (a: string): Hex => padHex(getAddress(a).toLowerCase() as Hex, { size: WORD });
 
-/** Field words for a variant (Call is rejected — use UnstoredCall). */
-function fieldWords(op: Operation): Hex[] {
-  switch (op.tag) {
-    case "AddSigner":
-    case "RemoveSigner":
-      return [addrWord(op.signer)];
-    case "ChangeSigRequired":
-      return [uintWord(op.count)];
-    case "TransferEth":
-      return [addrWord(op.target), uintWord(op.amount)];
-    case "TransferToken":
-      return [addrWord(op.target), addrWord(op.token), uintWord(op.amount)];
-    case "UnstoredCall":
-    case "ApproveSignedHash":
-    case "RevokeSignedHash":
-      return [b32Word(op.hash)];
-    case "Call":
-      throw new Error(
-        "encodeOperation: Call carries a dynamic bytes payload not representable by the " +
-          "static sum encoder. Queue it as UnstoredCall (hash + off-chain preimage) instead.",
-      );
+function fieldWord(sig: Exclude<FieldSig, "bytes">, value: unknown): Hex {
+  switch (sig) {
+    case "address":
+      return addrWord(value as string);
+    case "uint256":
+      return uintWord(value as bigint);
+    case "bytes32": {
+      const h = value as Hex;
+      if (size(h) !== WORD) throw new Error(`expected bytes32, got ${size(h)} bytes`);
+      return h;
+    }
   }
 }
 
-/** Encode an Operation as the 10-word `queue(Operation)` argument (no selector). */
+/**
+ * Encode an Operation as the `queue(Operation)` argument / `getOperation`
+ * return (no selector): `[offset][tag][fields…]`.
+ */
 export function encodeOperation(op: Operation): Hex {
-  const words = [...tagWords(variantIndex(op.tag)), ...fieldWords(op)];
-  if (words.length > OPERATION_WORDS) {
-    throw new Error(`operation ${op.tag} exceeds ${OPERATION_WORDS} words`);
+  const tag = TAG_OF.get(op.tag);
+  if (!tag) throw new Error(`unknown Operation tag: ${op.tag}`);
+
+  const out = new Region();
+  const body = WORD; // the single head word is the offset to the body
+  out.write(0, uintWord(BigInt(body)));
+  out.write(body, tag);
+
+  // Field heads sit inline after the tag; a `bytes` field puts an offset there
+  // (relative to the body) and appends [length][data] after the reserved body.
+  let offset = body + WORD;
+  let tail = body + OPERATION_BODY_SIZE;
+  for (const [key, sig] of VARIANT_FIELDS[op.tag]) {
+    const value = (op as unknown as Record<string, unknown>)[key];
+    if (sig === "bytes") {
+      const data = (value ?? "0x") as Hex;
+      out.write(offset, uintWord(BigInt(tail - body)));
+      out.write(tail, uintWord(BigInt(size(data))));
+      if (size(data) > 0) out.write(tail + WORD, data);
+      tail += WORD + Math.ceil(size(data) / WORD) * WORD;
+    } else {
+      out.write(offset, fieldWord(sig, value));
+    }
+    offset += WORD;
   }
-  while (words.length < OPERATION_WORDS) words.push(ZERO);
-  return concatHex(words);
+
+  out.pad(tail);
+  return out.hex();
 }
 
-/** Decode the inverse of `encodeOperation`. */
+// ─── decoding ────────────────────────────────────────────────────────────────
+
+const wordAt = (data: Hex, at: number): Hex => slice(data, at, at + WORD);
+const uintAt = (data: Hex, at: number): bigint => hexToBigInt(wordAt(data, at));
+
+/** Decode the inverse of {@link encodeOperation}. */
 export function decodeOperation(data: Hex): Operation {
-  const total = size(data);
-  if (total < OPERATION_WORDS * WORD) {
-    throw new Error(`operation calldata too short: ${total} bytes`);
-  }
-  const word = (i: number): Hex => slice(data, i * WORD, (i + 1) * WORD);
-  const isOne = (h: Hex) => hexToBigInt(h) === 1n;
+  if (size(data) < WORD) throw new Error(`operation data too short: ${size(data)} bytes`);
 
-  // Count leading `1` tag words (capped at the last variant's depth).
-  let k = 0;
-  const last = OPERATION_TAGS.length - 1;
-  while (k < last && isOne(word(k))) k++;
-  // For k < last the current word is the terminating inl (0); fields follow it.
-  const fieldStart = k < last ? k + 1 : k;
-  const tag = OPERATION_TAGS[k];
-  const f = (i: number) => word(fieldStart + i);
-  const addr = (i: number) => getAddress(slice(f(i), 12, 32));
-  const uint = (i: number) => hexToBigInt(f(i));
-
-  switch (tag) {
-    case "AddSigner":
-      return { tag, signer: addr(0) };
-    case "RemoveSigner":
-      return { tag, signer: addr(0) };
-    case "ChangeSigRequired":
-      return { tag, count: uint(0) };
-    case "TransferEth":
-      return { tag, target: addr(0), amount: uint(1) };
-    case "TransferToken":
-      return { tag, target: addr(0), token: addr(1), amount: uint(2) };
-    case "UnstoredCall":
-      return { tag, hash: f(0) };
-    case "ApproveSignedHash":
-      return { tag, hash: f(0) };
-    case "RevokeSignedHash":
-      return { tag, hash: f(0) };
-    case "Call":
-      throw new Error("decodeOperation: Call is not produced by this static codec");
-    default:
-      throw new Error(`decodeOperation: unhandled tag ${tag}`);
+  const body = Number(uintAt(data, 0));
+  if (size(data) < body + WORD) {
+    throw new Error(`operation body offset ${body} is past the end (${size(data)} bytes)`);
   }
+
+  const tag = TAG_TO_VARIANT.get(wordAt(data, body));
+  if (!tag) {
+    throw new Error(
+      `unknown Operation variant tag ${wordAt(data, body)} — the contract's ABI wire ` +
+        `format has changed, or this is not getOperation returndata`,
+    );
+  }
+
+  const op: Record<string, unknown> = { tag };
+  let offset = body + WORD;
+  for (const [key, sig] of VARIANT_FIELDS[tag]) {
+    if (sig === "bytes") {
+      const at = body + Number(uintAt(data, offset));
+      const len = Number(uintAt(data, at));
+      op[key] = len === 0 ? "0x" : slice(data, at + WORD, at + WORD + len);
+    } else if (sig === "address") {
+      op[key] = getAddress(slice(data, offset + 12, offset + WORD));
+    } else if (sig === "bytes32") {
+      op[key] = wordAt(data, offset);
+    } else {
+      op[key] = uintAt(data, offset);
+    }
+    offset += WORD;
+  }
+  return op as unknown as Operation;
 }
+
+// ─── static ADTs (OperationStatus, Vote) ─────────────────────────────────────
+
+/**
+ * Read the tag of a STATIC ADT return — laid out inline as `[tag][fields…]`,
+ * with no leading offset word. Returns the matching name from `names`.
+ */
+export function decodeStaticVariant<T extends string>(data: Hex, names: readonly T[]): T {
+  const tag = wordAt(data, 0);
+  for (const name of names) {
+    if (keccak256(toHex(name)) === tag) return name;
+  }
+  throw new Error(`unknown variant tag ${tag} (expected one of ${names.join(", ")})`);
+}
+
+/** Field word of a static ADT (index 0 is the first field after the tag). */
+export const staticVariantField = (data: Hex, i: number): Hex => wordAt(data, WORD + i * WORD);

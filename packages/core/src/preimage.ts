@@ -14,7 +14,9 @@ import type { Operation } from "./operations.js";
  * why the app persists it (see apps/db UnstoredCallPreimage).
  *
  * This lets the app express an arbitrary contract call (the dynamic `Call`
- * variant, which the static queue() codec can't encode) as an `UnstoredCall`.
+ * variant) as an `UnstoredCall`, trading on-chain payload storage for a
+ * preimage the caller must keep. `Call` is now encodable too (see
+ * ./operationCodec.ts), so this is a storage-cost choice, not a limitation.
  */
 export function unstoredCallPayload(target: Address, value: bigint, innerData: Hex): Hex {
   return concatHex([padHex(getAddress(target), { size: 32 }), padHex(toHex(value), { size: 32 }), innerData]);

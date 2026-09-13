@@ -15,6 +15,7 @@ import {
 import { encodeOperation } from "../src/operationCodec.js";
 import type { Operation } from "../src/operations.js";
 import { GETTER_SELECTORS } from "../src/selectors.js";
+import vectors from "./vectors/multisig.json" with { type: "json" };
 
 const w = (h: Hex) => padHex(h, { size: 32 });
 const standardSelector = (sig: string): Hex => keccak256(toBytes(sig)).slice(0, 10) as Hex;
@@ -77,7 +78,7 @@ describe("scalar return decoders", () => {
 
 describe("Operation return decoder", () => {
   // The return layout is byte-identical to the queue(Operation) argument.
-  it("round-trips every static variant against encodeOperation", () => {
+  it("round-trips every variant against encodeOperation", () => {
     const cases: Operation[] = [
       { tag: "AddSigner", signer: getAddress("0x00000000000000000000000000000000cafe0001") },
       { tag: "RemoveSigner", signer: getAddress("0x00000000000000000000000000000000cafe0002") },
@@ -88,6 +89,12 @@ describe("Operation return decoder", () => {
         target: getAddress("0x00000000000000000000000000000000cafe0004"),
         token: getAddress("0x00000000000000000000000000000000cafe0005"),
         amount: 42n,
+      },
+      {
+        tag: "Call",
+        target: getAddress("0x00000000000000000000000000000000cafe0006"),
+        value: 1n,
+        payload: "0x1234",
       },
       { tag: "UnstoredCall", hash: `0x${"ab".repeat(32)}` },
       { tag: "ApproveSignedHash", hash: `0x${"cd".repeat(32)}` },
@@ -100,21 +107,30 @@ describe("Operation return decoder", () => {
 });
 
 describe("OperationStatus return decoder", () => {
+  // Returndata captured from the deployed runtime (see test/vectors).
   it("decodes Approvals(n)", () => {
-    expect(decodeOperationStatus(concatHex([w("0x00"), w(toHex(2n))]))).toEqual({ tag: "Approvals", count: 2n });
+    expect(decodeOperationStatus(vectors.status.approvals_1 as Hex)).toEqual({ tag: "Approvals", count: 1n });
+    expect(decodeOperationStatus(vectors.status.approvals_0 as Hex)).toEqual({ tag: "Approvals", count: 0n });
   });
   it("decodes Rejected", () => {
-    expect(decodeOperationStatus(concatHex([w("0x01"), w("0x00")]))).toEqual({ tag: "Rejected" });
+    expect(decodeOperationStatus(vectors.status.rejected as Hex)).toEqual({ tag: "Rejected" });
   });
   it("decodes Executed", () => {
-    expect(decodeOperationStatus(concatHex([w("0x01"), w("0x01")]))).toEqual({ tag: "Executed" });
+    // Executed has no live vector (it needs a full approve+execute cycle), so
+    // build it from the pinned tag the contract emits.
+    expect(decodeOperationStatus(concatHex([vectors.variantTags["Executed()"] as Hex, w("0x00")]))).toEqual({
+      tag: "Executed",
+    });
+  });
+  it("rejects an unknown tag", () => {
+    expect(() => decodeOperationStatus(concatHex([w("0x00"), w("0x00")]))).toThrow(/unknown variant tag/);
   });
 });
 
 describe("Vote return decoder", () => {
   it("decodes None / Approved / Rejected", () => {
-    expect(decodeVote(concatHex([w("0x00"), w("0x00")]))).toBe("None");
-    expect(decodeVote(concatHex([w("0x01"), w("0x00")]))).toBe("Approved");
-    expect(decodeVote(concatHex([w("0x01"), w("0x01")]))).toBe("Rejected");
+    expect(decodeVote(vectors.vote.none as Hex)).toBe("None");
+    expect(decodeVote(vectors.vote.approved as Hex)).toBe("Approved");
+    expect(decodeVote(vectors.vote.rejected as Hex)).toBe("Rejected");
   });
 });

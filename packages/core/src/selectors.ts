@@ -49,11 +49,11 @@ export const GETTER_SELECTORS = {
   getNonce: "0xd087d288",
   /** getOperationsCount() -> uint256 */
   getOperationsCount: "0xdd1033f8",
-  /** getOperation(uint256 i) -> Operation (non-standard sum encoding) */
+  /** getOperation(uint256 i) -> Operation (ADT return, see operationCodec.ts) */
   getOperation: "0x202e3924",
-  /** getStatus(uint256 i) -> OperationStatus (non-standard sum encoding) */
+  /** getStatus(uint256 i) -> OperationStatus (ADT return, see operationCodec.ts) */
   getStatus: "0x5c622a0e",
-  /** getVote(uint256 i, address signer) -> Vote (non-standard sum encoding) */
+  /** getVote(uint256 i, address signer) -> Vote (ADT return, see operationCodec.ts) */
   getVote: "0xbc3f931f",
   /** isHashApproved(bytes32 hash) -> bool */
   isHashApproved: "0xb76eefe2",

@@ -61,13 +61,13 @@ on-chain.** Consequences:
   `MultisigOperation(uint256 kind,bytes operation)` with a flat `[tag][fields]`
   operation preimage. Implemented in `packages/core/src/hash.ts` (mirrors the
   contract; used by the relay layer, a later phase).
-- **`Operation` uses Solcore's non-standard sum-type ABI** — a right-nested
-  binary sum ("sum-wide-product"): variant *k* is *k* `inr` (`1`) tag words then
-  an `inl` (`0`), the field words, zero-padded to a fixed 10-word width.
-  Implemented + validated against `packages/core/test/vectors/multisig.json` in
-  `operationCodec.ts`. The dynamic `Call(address,uint256,bytes)` variant isn't
-  representable by the static encoder, so arbitrary calls are queued as
-  `UnstoredCall` (hash on-chain + preimage in the DB). `approve`/`reject`/
+- **`Operation` uses Solcore's ADT ABI** — a multi-constructor ADT is
+  discriminated on the wire by one `keccak256("Name(argSigs)")` tag word.
+  `Operation` is dynamic (its `Call(address,uint256,bytes)` variant carries a
+  `bytes`), so it is encoded as `[offset][tag][fields…]` with the body padded to
+  the widest variant. Implemented in `operationCodec.ts` and validated against
+  `packages/core/test/vectors/multisig.json`, whose vectors are captured by
+  executing the deployed runtime. `approve`/`reject`/
   `execute` are standard ABI.
 
 ## Getting started
@@ -111,7 +111,7 @@ The contract exposes **getters** for all of its state (`getSignersCount` /
 `getSigner` / `getSignersRequired` / `getNonce` / `getOperationsCount` /
 `getOperation` / `getStatus` / `getVote` / `isHashApproved` / `isSigner`), so
 the web app reads everything straight from chain — no index required. The
-calldata builders and return decoders (including the non-standard sum-typed
+calldata builders and return decoders (including the ADT-typed
 `Operation` / `OperationStatus` / `Vote` returns) live in `packages/core`
 `getters.ts`; the web read layer is `apps/web/src/lib/multisig.ts`. Only
 `UnstoredCall` preimages (and, later, relayed signatures) live off-chain — the
@@ -122,10 +122,12 @@ but the web app no longer depends on it.
 
 Calldata is built in `packages/core` and sent as raw transactions:
 
-- `queue(Operation)` — sum-type codec (`operationCodec.ts`, 10-word nested
-  binary sum), validated against the golden vectors. Send-ETH uses the native
-  `TransferEth` op; an arbitrary call is queued as `UnstoredCall` (hash on-chain,
-  `[target][value][data]` preimage stored in the DB and supplied at execute).
+- `queue(Operation)` — ADT codec (`operationCodec.ts`, keccak variant tag),
+  validated against the golden vectors. Send-ETH uses the native `TransferEth`
+  op; an arbitrary call is queued as `UnstoredCall` (hash on-chain,
+  `[target][value][data]` preimage stored off-chain and supplied at execute) —
+  the `Call` variant, which stores the payload on-chain instead, is encodable
+  too.
 - `approve(nonce)` / `reject(nonce)` / `execute(nonce, payload)` — standard ABI.
 - Strict sequential execution: only the op at `nonce` can execute; a rejected op
   executes as a skip that advances the nonce.

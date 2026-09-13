@@ -3,14 +3,13 @@ import {
   encodeAbiParameters,
   getAddress,
   hexToBigInt,
-  padHex,
   size,
   slice,
   type Address,
   type Hex,
 } from "viem";
 import { GETTER_SELECTORS } from "./selectors.js";
-import { decodeOperation, OPERATION_WORDS } from "./operationCodec.js";
+import { decodeOperation, decodeStaticVariant, staticVariantField } from "./operationCodec.js";
 import type { Operation, OperationStatus, Vote } from "./operations.js";
 
 /**
@@ -22,11 +21,10 @@ import type { Operation, OperationStatus, Vote } from "./operations.js";
  * `staticcall`: build the calldata here, `eth_call` it, and decode the return.
  *
  * The scalar getters (uint256/address/bool) use standard ABI. The three that
- * return a Solcore sum (`Operation`, `OperationStatus`, `Vote`) come back in the
- * same right-nested binary-sum layout Solcore uses everywhere (tag word 0 = inl,
- * 1 = inr; fields inline; see ./operationCodec.ts and std/ABIGeneric.solc), with
- * NO leading offset word — `abi_encode` writes the head from byte 0. We decode
- * that layout by hand below.
+ * return a Solcore ADT (`Operation`, `OperationStatus`, `Vote`) come back in
+ * the ABI sum layout: a single `keccak256("Name(argSigs)")` tag word, inline
+ * for a static ADT and behind an offset word for a dynamic one. See
+ * ./operationCodec.ts for the format and std/ABIGeneric.solc for the source.
  */
 
 const WORD = 32;
@@ -89,38 +87,32 @@ export const decodeBool = (data: Hex): boolean => wordUint(data, 0) !== 0n;
 /**
  * Decode an `Operation` return.
  *
- * The layout is identical to the `queue(Operation)` argument — the same generic
- * sum encoding produces both — so we reuse the golden-vector-validated
- * {@link decodeOperation}. That decoder wants the full fixed head width; the
- * getter always returns exactly that (`headSize` == OPERATION_WORDS words), but
- * we defensively right-pad in case a build returns a tighter head.
+ * Byte-for-byte the same layout as the `queue(Operation)` argument — one
+ * derived ABIEncode instance produces both — so this is just
+ * {@link decodeOperation}.
  */
-export function decodeOperationReturn(data: Hex): Operation {
-  const words = Math.floor(size(data) / WORD);
-  const padded = words < OPERATION_WORDS ? padHex(data, { dir: "right", size: OPERATION_WORDS * WORD }) : data;
-  return decodeOperation(padded);
-}
+export const decodeOperationReturn = decodeOperation;
 
 /**
- * Decode an `OperationStatus` return.
+ * Decode an `OperationStatus` return: a static ADT, so `[tag][fields…]` inline.
  *
- *   Approvals(count) -> [0][count]     (inl)
- *   Rejected         -> [1][0]         (inr, inl)
- *   Executed         -> [1][1]         (inr, inr)
+ *   Approvals(count) -> [keccak256("Approvals(uint256)")][count]
+ *   Rejected         -> [keccak256("Rejected()")][padding]
+ *   Executed         -> [keccak256("Executed()")][padding]
  */
 export function decodeOperationStatus(data: Hex): OperationStatus {
-  if (wordUint(data, 0) === 0n) return { tag: "Approvals", count: wordUint(data, 1) };
-  return wordUint(data, 1) === 0n ? { tag: "Rejected" } : { tag: "Executed" };
+  const tag = decodeStaticVariant(data, ["Approvals(uint256)", "Rejected()", "Executed()"] as const);
+  if (tag === "Approvals(uint256)") {
+    return { tag: "Approvals", count: hexToBigInt(staticVariantField(data, 0)) };
+  }
+  return { tag: tag === "Rejected()" ? "Rejected" : "Executed" };
 }
 
 /**
- * Decode a `Vote` return.
- *
- *   None     -> [0]         (inl)
- *   Approved -> [1][0]      (inr, inl)
- *   Rejected -> [1][1]      (inr, inr)
+ * Decode a `Vote` return: a static ADT with only nullary variants, so the tag
+ * word is the whole payload (one padding word follows).
  */
 export function decodeVote(data: Hex): Vote {
-  if (wordUint(data, 0) === 0n) return "None";
-  return wordUint(data, 1) === 0n ? "Approved" : "Rejected";
+  const tag = decodeStaticVariant(data, ["None()", "Approved()", "Rejected()"] as const);
+  return tag.slice(0, -2) as Vote;
 }

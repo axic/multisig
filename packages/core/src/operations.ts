@@ -7,13 +7,14 @@ import type { Address, Hex } from "viem";
  *   test/examples/dispatch/multisig.solc
  *
  * These mirror the `data Operation | Signature | OperationStatus | Vote`
- * declarations in the contract. The ORDER of the variants matters: it is the
- * basis for the on-chain binary-sum ("sum-wide-product") ABI encoding that
- * Solcore emits (see ./operationCodec.ts). Do not reorder without updating the
- * codec and re-checking the golden vectors.
+ * declarations in the contract. On the ABI wire each variant is discriminated
+ * by `keccak256("Name(argSigs)")` (see ./operationCodec.ts), so the NAMES and
+ * FIELD TYPES are load-bearing, not the declaration order. Renaming a
+ * constructor or retyping a field changes the tag — update the codec and
+ * regenerate the golden vectors.
  */
 
-/** Discriminant tags, declared in the same order as the Solcore `data Operation`. */
+/** Variant names, in the order the Solcore `data Operation` declares them. */
 export type OperationTag =
   | "AddSigner"
   | "RemoveSigner"
@@ -47,9 +48,10 @@ export type Operation =
   /**
    * UnstoredCall stores ONLY the keccak256 hash on-chain. The preimage
    * (encoded as `[address target][uint256 value][bytes payload]`) is supplied
-   * at execute() time and re-hashed by the contract. This is the reason the app
-   * needs a database: without the stored preimage a queued UnstoredCall can
-   * never be executed. See apps/db `UnstoredCallPreimage`.
+   * at execute() time and re-hashed by the contract, so the preimage has to be
+   * kept off-chain (the web app keeps it in localStorage; see apps/db
+   * `UnstoredCallPreimage` for the server-side index). `Call` stores its
+   * payload on-chain instead and needs no preimage.
    */
   | { tag: "UnstoredCall"; hash: Hex }
   | { tag: "ApproveSignedHash"; hash: Hex }
