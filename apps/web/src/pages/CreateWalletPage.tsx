@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getAddress, isAddress } from "viem";
 import { useAccount, useChainId, useChains, usePublicClient, useSendTransaction, useSwitchChain } from "wagmi";
-import { Button, Card, Input, Label, Toast } from "../components/index.js";
+import { Button, Card, ErrorNotice, Input, Label, Toast } from "../components/index.js";
 import { trackWallet } from "../lib/registry.js";
 
 /**
@@ -40,6 +40,11 @@ export function CreateWalletPage() {
   const [label, setLabel] = useState("");
   const [existing, setExisting] = useState("");
 
+  // Pasted addresses carry whitespace; validate inline rather than by failing
+  // the mutation, so the field itself says what is wrong while you type.
+  const trimmedExisting = existing.trim();
+  const invalidExisting = trimmedExisting.length > 0 && !isAddress(trimmedExisting);
+
   const deploy = useMutation({
     mutationFn: async () => {
       if (!account) throw new Error("connect a wallet first");
@@ -65,16 +70,15 @@ export function CreateWalletPage() {
 
   const track = useMutation({
     mutationFn: async () => {
-      if (!isAddress(existing)) throw new Error("enter a valid Multisig address");
+      if (!isAddress(trimmedExisting)) throw new Error("enter a valid Multisig address");
       // The signer set, threshold, and everything else are read from chain via
       // the getters, so tracking just remembers the address on the chosen chain.
-      return trackWallet({ chainId, address: getAddress(existing), label: label || undefined });
+      return trackWallet({ chainId, address: getAddress(trimmedExisting), label: label || undefined });
     },
     onSuccess: (w) => navigate(`/wallet/${w.chainId}/${w.address}`),
   });
 
   const busy = deploy.isPending || track.isPending;
-  const err = deploy.error ?? track.error;
 
   return (
     <section className="max-w-[560px]">
@@ -110,36 +114,40 @@ export function CreateWalletPage() {
         </div>
       </Card>
 
-      {err && (
-        <div className="mt-4">
-          <Toast state="quorum" emphatic title="Something went wrong" detail={err.message} />
-        </div>
-      )}
-
       <div className="mt-5 flex flex-col gap-6">
         <Card title="Deploy">
-          <div className="flex items-center justify-between gap-4">
-            <p className="text-sm text-body">
-              {creationCode ? (
-                <>Creation code loaded ({(creationCode.length - 2) / 2} bytes).</>
-              ) : (
-                <>No <span className="font-mono">VITE_MULTISIG_CREATION_CODE</span> — use “Track existing” below.</>
-              )}
-            </p>
-            <Button disabled={!isConnected || !creationCode || busy} onClick={() => deploy.mutate()}>
-              {deploy.isPending ? "Deploying…" : "Deploy wallet"}
-            </Button>
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-sm text-body">
+                {creationCode ? (
+                  <>Creation code loaded ({(creationCode.length - 2) / 2} bytes).</>
+                ) : (
+                  <>No <span className="font-mono">VITE_MULTISIG_CREATION_CODE</span> — use “Track existing” below.</>
+                )}
+              </p>
+              <Button disabled={!isConnected || !creationCode || busy} onClick={() => deploy.mutate()}>
+                {deploy.isPending ? "Deploying…" : "Deploy wallet"}
+              </Button>
+            </div>
+            <ErrorNotice error={deploy.error} action="Deployment" />
           </div>
         </Card>
 
         <Card title="Track an existing wallet">
           <div className="flex flex-col gap-4">
-            <Input label="Multisig address" placeholder="0x…" value={existing} onChange={(e) => setExisting(e.target.value)} />
+            <Input
+              label="Multisig address"
+              placeholder="0x…"
+              value={existing}
+              onChange={(e) => setExisting(e.target.value)}
+              error={invalidExisting ? "not a valid address" : undefined}
+            />
             <div className="flex justify-end">
-              <Button variant="secondary" disabled={busy} onClick={() => track.mutate()}>
+              <Button variant="secondary" disabled={busy || !trimmedExisting || invalidExisting} onClick={() => track.mutate()}>
                 {track.isPending ? "Tracking…" : "Track wallet"}
               </Button>
             </div>
+            <ErrorNotice error={track.error} action="Tracking" />
           </div>
         </Card>
       </div>

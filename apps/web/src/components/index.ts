@@ -19,6 +19,7 @@ export {
 export { Address, Amount, Calldata } from "./data.js";
 export { Modal, type ModalProps } from "./Modal.js";
 export { Toast, type ToastProps } from "./Toast.js";
+export { ErrorNotice, type ErrorNoticeProps } from "./ErrorNotice.js";
 export { AppShell, type AppShellProps, type NavItem } from "./AppShell.js";
 export { OperationRow } from "./OperationRow.js";
 export { ProposeModal } from "./ProposeModal.js";
