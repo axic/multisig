@@ -63,6 +63,8 @@ function WalletView({ wallet }: { wallet: WalletState }) {
     qc.invalidateQueries({ queryKey: ["operations", chainId, address] });
   };
 
+  // Shared across every row; each OperationRow picks out the pending/failed
+  // state belonging to its own operation and reports it in place.
   const actions = useOperationActions(wallet, refresh);
 
   const operations = opsQ.data ?? [];
@@ -155,12 +157,6 @@ function WalletView({ wallet }: { wallet: WalletState }) {
             ))}
           </div>
         </div>
-      )}
-
-      {(actions.approve.error || actions.execute.error || actions.reject.error) && (
-        <p className="text-sm text-signal">
-          {(actions.approve.error ?? actions.execute.error ?? actions.reject.error)?.message}
-        </p>
       )}
 
       <ProposeModal wallet={wallet} open={proposeOpen} onClose={() => setProposeOpen(false)} onDone={refresh} />

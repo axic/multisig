@@ -1,8 +1,10 @@
 import {
+  confirm,
   encodeApprove,
   encodeExecute,
   encodeQueue,
   encodeReject,
+  preflight,
   unstoredCallHash,
   unstoredCallPayload,
   type Operation as CoreOperation,
@@ -66,8 +68,11 @@ export function useQueueOperation(wallet: WalletState, onDone: () => void) {
           payload: preimage.payload,
         });
       }
-      const hash = await sendTransactionAsync({ to: getAddress(wallet.address), data: encodeQueue(op) });
-      if (publicClient) await publicClient.waitForTransactionReceipt({ hash });
+      const to = getAddress(wallet.address);
+      const data = encodeQueue(op);
+      await preflight(publicClient, { account, to, data });
+      const hash = await sendTransactionAsync({ to, data });
+      if (publicClient) await confirm(publicClient, hash, { account, to, data });
       return hash;
     },
     onSuccess: onDone,
@@ -81,9 +86,12 @@ export function useOperationActions(wallet: WalletState, onDone: () => void) {
   const publicClient = usePublicClient({ chainId: wallet.chainId });
 
   const to = getAddress(wallet.address);
+  // Simulate, send, then insist the receipt actually succeeded — a revert must
+  // reach the caller as a rejected mutation, not a silent no-op.
   const send = async (data: Hex) => {
+    await preflight(publicClient, { account, to, data });
     const hash = await sendTransactionAsync({ to, data });
-    if (publicClient) await publicClient.waitForTransactionReceipt({ hash });
+    if (publicClient) await confirm(publicClient, hash, { account, to, data });
     return hash;
   };
 

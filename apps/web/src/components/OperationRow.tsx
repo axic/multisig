@@ -4,10 +4,20 @@ import type { useOperationActions } from "../lib/useOperationActions.js";
 import { Button } from "./Button.js";
 import { QuorumMark } from "./QuorumMark.js";
 import { StateBadge, StatusDot, stateFromCount, type SignatureState } from "./SignatureState.js";
+import { ErrorNotice } from "./ErrorNotice.js";
 
 type Actions = ReturnType<typeof useOperationActions>;
+type Action = Actions[keyof Actions];
 
 const eq = (a?: string | null, b?: string | null) => Boolean(a && b && a.toLowerCase() === b.toLowerCase());
+
+/**
+ * The three mutations are shared by every row, so a result only belongs to the
+ * row it was fired from — `variables` is the operation that was passed to
+ * `mutate`. Without this a failure would have to be reported page-wide, far
+ * from the button that caused it.
+ */
+const isMine = (action: Action, op: OperationView) => action.variables?.index === op.index;
 
 export function OperationRow({
   op,
@@ -31,6 +41,21 @@ export function OperationRow({
   // approvals or has been rejected (rejection executes as a skip).
   const canExecute = isNext && (rejected || (open && op.approvals >= required));
   const busy = actions.approve.isPending || actions.reject.isPending || actions.execute.isPending;
+  const executing = actions.execute.isPending && isMine(actions.execute, op);
+  const approving = actions.approve.isPending && isMine(actions.approve, op);
+
+  // Surface a failed approve/reject/execute on the row that fired it. A revert
+  // leaves the operation exactly as it was, so without this the click simply
+  // appears to do nothing.
+  // "Execution" for the skip button too: it is the same execute() call, and
+  // the row it renders under says which operation it belongs to.
+  const failed = (
+    [
+      [actions.execute, "Execution"],
+      [actions.approve, "Approval"],
+      [actions.reject, "Rejection"],
+    ] as const
+  ).find(([action]) => action.error && isMine(action, op));
 
   const badgeState: SignatureState =
     op.status === "Executed" ? "executed" : stateFromCount(op.approvals, required);
@@ -75,7 +100,7 @@ export function OperationRow({
                 disabled={!isSigner || op.myVote === "Approved" || busy}
                 onClick={() => actions.approve.mutate(op)}
               >
-                {op.myVote === "Approved" ? "Approved" : actions.approve.isPending ? "Signing…" : "Approve"}
+                {op.myVote === "Approved" ? "Approved" : approving ? "Signing…" : "Approve"}
               </Button>
               <Button size="sm" variant="tertiary" disabled={!isSigner || busy} onClick={() => actions.reject.mutate(op)}>
                 Reject
@@ -97,10 +122,12 @@ export function OperationRow({
             }
             onClick={() => actions.execute.mutate(op)}
           >
-            {actions.execute.isPending ? "Executing…" : rejected ? "Skip" : "Execute"}
+            {executing ? "Executing…" : rejected ? "Skip" : "Execute"}
           </Button>
         </div>
       )}
+
+      {failed && <ErrorNotice error={failed[0].error} action={failed[1]} />}
     </div>
   );
 }

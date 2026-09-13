@@ -1,3 +1,4 @@
+import { decodeWalletRevert, revertDataFrom } from "@multisig/core";
 import { BaseError, UserRejectedRequestError } from "viem";
 
 /**
@@ -38,7 +39,9 @@ export function describeError(error: unknown, action: string): DisplayError | un
         rejected: true,
       };
     }
-    const detail = error.shortMessage || error.message;
+    // The wallet reverts with a bare 4-byte selector, which viem can only
+    // report as "execution reverted" — name it where the data is there to read.
+    const detail = decodeWalletRevert(revertDataFrom(error)) ?? error.shortMessage ?? error.message;
     const raw = error.message.trim();
     return { title: `${action} failed`, detail, raw: raw === detail.trim() ? undefined : raw, rejected: false };
   }

@@ -1,4 +1,4 @@
-import { encodeInitialize, resolveCreationCode } from "@multisig/core";
+import { confirm, encodeInitialize, resolveCreationCode } from "@multisig/core";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -56,12 +56,14 @@ export function CreateWalletPage() {
       if (!client) throw new Error("no RPC client for the selected chain");
       // 1. Deploy the Multisig runtime.
       const hash = await sendTransactionAsync({ data: creationCode });
-      const receipt = await client.waitForTransactionReceipt({ hash });
+      const receipt = await confirm(client, hash);
       if (!receipt.contractAddress) throw new Error("deploy tx produced no contract address");
       const wallet = getAddress(receipt.contractAddress);
       // 2. Initialize it — sets the connected account as signer[0], threshold 1.
-      const initHash = await sendTransactionAsync({ to: wallet, data: encodeInitialize(account) });
-      await client.waitForTransactionReceipt({ hash: initHash });
+      // A reverted initialize must not be tracked as a usable wallet.
+      const initData = encodeInitialize(account);
+      const initHash = await sendTransactionAsync({ to: wallet, data: initData });
+      await confirm(client, initHash, { account, to: wallet, data: initData });
       // Remember the address locally; all state is read back from chain.
       return trackWallet({ chainId, address: wallet, label: label || undefined });
     },

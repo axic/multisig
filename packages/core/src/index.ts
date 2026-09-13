@@ -4,6 +4,8 @@
 // hash.ts and is a later phase.
 export * from "./operations.js";
 export * from "./selectors.js";
+export * from "./errors.js";
+export * from "./tx.js";
 export * from "./abi.js";
 export * from "./operationCodec.js";
 export * from "./getters.js";
